@@ -78,6 +78,13 @@ export function isOnTheLine(status: FloorStatus): boolean {
   return status !== "not-started";
 }
 
+// Deliberately no "is it overdue to start" here. `isLateToStart` in board.ts
+// already answers the plan half of that question, and this file answers the
+// floor half with `isOnTheLine`. The two composed - untouched AND past its
+// planned start - is what earns the red pill; see the callers in
+// schedule-board.tsx and app/schedule/page.tsx. A third function would have
+// been a second, differently-named copy of a rule that already exists twice.
+
 /**
  * The last press per production order.
  *

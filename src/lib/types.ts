@@ -44,7 +44,16 @@ export type ProdOrderComponent = {
   description: string;
   unitOfMeasureCode: string;
   quantityPer: number;
-  quantity: number;
+  /**
+   * No `quantity` here on purpose. Table 5407 carries one and it reads 0 on all
+   * 1,961 rows, so a field of that name would be a loaded gun: the obvious one
+   * to reach for, and silently zero. `expectedQuantity` is the populated figure
+   * and is what the board uses; `remainingQuantity` is what is left to consume.
+   *
+   * Third field in this tenant to fail that check, after `Finished Quantity`
+   * and the header's `Routing No.` - which is why it is written down rather
+   * than just deleted.
+   */
   remainingQuantity: number;
   expectedQuantity: number;
   locationCode: string;

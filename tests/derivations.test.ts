@@ -38,6 +38,7 @@ import {
   countFloorStates,
   floorStatusOf,
   isOnTheLine,
+  type FloorStatus,
 } from "../src/lib/floor.ts";
 import { toStatus, statusName, RELEASED, FINISHED } from "../src/lib/status.ts";
 import {
@@ -79,6 +80,7 @@ import {
   completionOf,
   shortagesFor,
   pickStateFor,
+  pickProgressFor,
   countPickStates,
   buildPickStateMap,
   toComponentLine,
@@ -540,7 +542,6 @@ function component(overrides: Partial<ProdOrderComponent> = {}): ProdOrderCompon
     description: "Bottle",
     unitOfMeasureCode: "EA",
     quantityPer: 1,
-    quantity: 100,
     remainingQuantity: 100,
     expectedQuantity: 100,
     locationCode: "PRODUCTION",
@@ -846,7 +847,6 @@ function comp(over: Record<string, unknown> = {}) {
     description: "Thing",
     unitOfMeasureCode: "EACH",
     quantityPer: 1,
-    quantity: 0,
     remainingQuantity: 100,
     expectedQuantity: 100,
     locationCode: "PRODUCTION",
@@ -1796,4 +1796,65 @@ test("a long value is cut short, and never cut to a trailing hyphen", () => {
   // 28 characters of it: "Excel-Packaging-Machinery-Li".
   assert.equal(name, "vendors-Excel-Packaging-Machinery-Li-2026-08-30.xlsx");
   assert.ok(!name.includes("--"), "no doubled hyphen where the cut landed");
+});
+
+
+// --- "Not started" that means something -------------------------------------
+
+test("the red 'Not started' pill is untouched AND past its planned start", () => {
+  // Composed from two functions that already existed rather than a third one:
+  // isOnTheLine is the floor half, isLateToStart the plan half. Neither alone
+  // is the thing worth colouring red - the state is true of 888 of 982 orders,
+  // and the plan being past is true of orders the floor is already running.
+  const overdue = (status: FloorStatus, startingDate: string | null) =>
+    !isOnTheLine(status) &&
+    isLateToStart(order({ startingDate, endingDate: null }), "2026-08-30");
+
+  assert.equal(overdue("not-started", "2026-08-20"), true);
+  assert.equal(overdue("not-started", "2026-09-04"), false);
+
+  // Today is not late - an order due to start this morning has all day.
+  assert.equal(overdue("not-started", "2026-08-30"), false);
+
+  // Anything the floor has touched is not a starting problem, however old.
+  for (const status of ["running", "complete", "paused", "qa-booked"] as const) {
+    assert.equal(overdue(status, "2026-01-01"), false);
+  }
+
+  // No planned start, nothing to be late against.
+  assert.equal(overdue("not-started", null), false);
+});
+
+// --- pick progress from BC's own fields -------------------------------------
+
+test("pickProgressFor counts outstanding lines from Completely Picked", () => {
+  const lines = [
+    component({ itemNo: "A", remainingQuantity: 100, completelyPicked: true }),
+    component({ itemNo: "B", remainingQuantity: 100, completelyPicked: false }),
+    component({ itemNo: "C", remainingQuantity: 100, completelyPicked: false }),
+  ];
+
+  assert.deepEqual(pickProgressFor(lines), { total: 3, picked: 1, outstanding: 2 });
+});
+
+test("pickProgressFor ignores lines with nothing left to consume", () => {
+  // Matches pickStateFor: a fully consumed line is not outstanding work, so it
+  // must not inflate the "still to pick" count on a card.
+  const lines = [
+    component({ itemNo: "A", remainingQuantity: 0, completelyPicked: false }),
+    component({ itemNo: "B", remainingQuantity: 50, completelyPicked: false }),
+  ];
+
+  assert.deepEqual(pickProgressFor(lines), { total: 1, picked: 0, outstanding: 1 });
+});
+
+test("pickProgressFor on a fully picked order has nothing outstanding", () => {
+  // The card shows this block only when outstanding > 0, so a picked order must
+  // report zero rather than a cheerful "0 lines still to pick".
+  const lines = [
+    component({ itemNo: "A", remainingQuantity: 10, completelyPicked: true }),
+    component({ itemNo: "B", remainingQuantity: 10, completelyPicked: true }),
+  ];
+
+  assert.deepEqual(pickProgressFor(lines), { total: 2, picked: 2, outstanding: 0 });
 });

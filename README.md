@@ -64,8 +64,22 @@ missing setup step should be legible, not a stack trace.
 npm run build
 ```
 
-`output: "standalone"` means the build produces a self-contained server. Copy
-these to the internal box and run it:
+**See `DEPLOY.md` for the whole thing** - putting it on a machine, making it
+start on its own, and the traps that do not announce themselves. On the box:
+
+```powershell
+.\scripts\install-node-user.ps1   # only if Node is missing and you have no admin
+.\scripts\deploy.ps1              # build, swap, restart, verify
+.\scripts\install-task.ps1        # once, to make it start on its own
+```
+
+All three work without administrator rights. `install-task.ps1 -AtLogon`
+registers the task in your own account instead of at boot; the only thing left
+needing admin is the firewall rule that lets other machines reach it, and the
+script prints the exact request to make.
+
+`output: "standalone"` means the build produces a self-contained server. What
+the script copies, and what to copy by hand if you ever need to:
 
 ```
 .next/standalone/     →  the server and only the node_modules it needs

@@ -3,10 +3,11 @@
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardOrder, ComponentLine } from "@/lib/types";
-import { completionOf, pickStateLabel, type PickState } from "@/lib/chain";
+import { completionOf, pickStateLabel, type PickProgress, type PickState } from "@/lib/chain";
 import DateFilterBox from "@/components/date-filter-box";
 import { parseDateFilter } from "@/lib/date-filter";
-import { floorLabel, floorTone } from "@/lib/floor";
+import { floorLabel, floorTone, isOnTheLine } from "@/lib/floor";
+import { isLateToStart } from "@/lib/board";
 import { formatDate, formatDayHeading, formatNumber } from "@/lib/format";
 import {
   groupByDay,
@@ -39,6 +40,7 @@ export default function ScheduleBoard({
   componentsByOrder,
   shortagesByOrder,
   pickStateByOrder,
+  pickProgressByOrder,
   asOf,
 }: {
   orders: BoardOrder[];
@@ -48,6 +50,14 @@ export default function ScheduleBoard({
   shortagesByOrder: Record<string, number>;
   /** Pick state per order. Empty when the stock feed is incomplete. */
   pickStateByOrder: Record<string, PickState>;
+  /**
+   * Lines still to pick on orders the floor has STARTED, from BC's own picking
+   * fields. The two never both apply to one order: pick state answers "can this
+   * be picked" for orders nobody has touched, this answers "is it picked yet"
+   * for the ones already on the line. Only orders with something outstanding
+   * appear.
+   */
+  pickProgressByOrder: Record<string, PickProgress>;
   asOf: string;
 }) {
   // Which centres are switched OFF, not which are on. Storing the exclusions
@@ -351,6 +361,7 @@ export default function ScheduleBoard({
                         components={componentsByOrder[order.no] ?? []}
                         shortages={shortagesByOrder[order.no] ?? 0}
                         pickState={pickStateByOrder[order.no]}
+                        pickProgress={pickProgressByOrder[order.no]}
                         colour={colourForLocation.get(order.locationCode)}
                         asOf={asOf}
                       />
@@ -371,6 +382,7 @@ function OrderCard({
   components,
   shortages,
   pickState,
+  pickProgress,
   colour,
   asOf,
 }: {
@@ -378,12 +390,21 @@ function OrderCard({
   components: ComponentLine[];
   shortages: number;
   pickState?: PickState;
+  pickProgress?: PickProgress;
   colour?: string;
   asOf: string;
 }) {
   const noWorkCenter = order.workCenter === "" || order.workCenter === UNASSIGNED;
   // Still on the board, but the plan had it finished before now.
   const late = order.endingDate !== null && order.endingDate < asOf;
+  // Nobody has touched it on the floor AND the plan says it should have begun.
+  // Only this wears the red "Not started". The state on its own is true of 888
+  // of the 982 orders on the board, and a pill on nine cards in ten is read as
+  // decoration rather than information; this is the 310 worth looking at.
+  //
+  // The label does not change, only the emphasis - it still reads what the
+  // shop floor's own picking control board calls it.
+  const lateToStart = !isOnTheLine(order.floor.status) && isLateToStart(order, asOf);
 
   return (
     <article
@@ -400,11 +421,15 @@ function OrderCard({
             published page exposes, so it read false everywhere and that pill
             appeared on every card that was not currently running. */}
         <span
-          className={`fl fl-${floorTone(order.floor.status) || "none"}`}
+          className={`fl fl-${floorTone(order.floor.status) || "none"}${
+            lateToStart ? " fl-overdue" : ""
+          }`}
           title={
             order.floor.operator
               ? `${floorLabel(order.floor.status)} — ${order.floor.operator}`
-              : floorLabel(order.floor.status)
+              : lateToStart
+                ? `Not started, and it was planned to start ${formatDate(order.startingDate)}`
+                : floorLabel(order.floor.status)
           }
         >
           {floorLabel(order.floor.status)}
@@ -447,6 +472,21 @@ function OrderCard({
               {shortages} line{shortages === 1 ? "" : "s"} short
             </span>
           )}
+        </p>
+      )}
+
+      {/* The started order's version of the same worry. It cannot carry a pick
+          state - the stock it needs has already moved - so this is BC's own
+          count of lines not completely picked. */}
+      {pickProgress && (
+        <p className="pickstate">
+          <span
+            className="pill part"
+            title={`${pickProgress.picked} of ${pickProgress.total} component lines completely picked`}
+          >
+            {pickProgress.outstanding} line{pickProgress.outstanding === 1 ? "" : "s"} still to
+            pick
+          </span>
         </p>
       )}
 

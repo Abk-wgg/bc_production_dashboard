@@ -71,7 +71,8 @@ export function toComponent(row: RawRow): ProdOrderComponent {
     description: toText(pick(row, "Description")),
     unitOfMeasureCode: toText(pick(row, "Unit_of_Measure_Code", "UnitOfMeasureCode")),
     quantityPer: toNumber(pick(row, "Quantity_per", "QuantityPer")),
-    quantity: toNumber(pick(row, "Quantity")),
+    // "Quantity" is deliberately not read - it is 0 on every row. See the note
+    // on ProdOrderComponent in types.ts.
     remainingQuantity: toNumber(pick(row, "Remaining_Quantity", "RemainingQuantity")),
     expectedQuantity: toNumber(pick(row, "Expected_Quantity", "ExpectedQuantity")),
     locationCode: toText(pick(row, "Location_Code", "LocationCode")),

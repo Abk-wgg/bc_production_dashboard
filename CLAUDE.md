@@ -43,6 +43,12 @@ The constraints are the design. Check any change against all of them at once.
   - So adding a page means adding a `--<page>-accent/-soft/-plane` triple to
     `:root` plus one `body:has()` block — never a bare `--accent` on the page
     class. The header is outside `<main>` and can only see global tokens.
+  - **Floor-state colours are the exception: they are global, never page-tinted.**
+    Running, Complete, Paused and Not started hardcode theirs, and QA booked now
+    has its own `--qa-ink` for the same reason. Built from `--accent` it was
+    rust on orders - a warm tone sitting beside Paused's amber - and blue on the
+    schedule. A state that changes colour by page is not a state you can read by
+    colour, which is the only thing a 12px pill is for.
   - **The header's accent band is 1px of border plus a 2px inset shadow, not a
     3px border.** `--header-h` is a fixed 54px that every sticky bar offsets
     against; a thicker border makes the header taller and leaves them all 2px
@@ -407,6 +413,29 @@ remove real work from the board.
     It reads false on all 94 started orders, while those same orders' own
     component lines read true on 80% of themselves. Third instance of the
     rule: when a field exists on the header and the line, trust the line.
+  - **So the started order gets the other half of the question.** The stock
+    maths answers "can this be picked" and is switched off above; BC's own
+    `Completely Picked` on the LINE answers "is it picked yet", survives the
+    stock having moved, and works after a Start. `pickProgressFor` in
+    `chain.ts` counts lines with something left to consume that are not
+    completely picked, and the card reads "3 lines still to pick" under the
+    Running pill. On the current board that is **51 lines across 31 orders**.
+    The two never both apply to one order - untouched orders get the pick
+    state, started ones get this.
+- **The red "Not started" pill is untouched AND past its planned start.** The
+  state alone is true of 888 of the 982 orders on the board, so a red pill on
+  nine cards in ten was decoration: nothing is learned by seeing it. Narrowed to
+  orders whose planned start has already gone it marks **310**, and means
+  "should have begun by now".
+  - **The label does not change, only the emphasis** - it still reads what the
+    floor's own picking control board calls it. Grey pill by default,
+    `.fl-overdue` adds the red.
+  - **No third function for it.** `isOnTheLine` in `floor.ts` is the floor half
+    and `isLateToStart` in `board.ts` is the plan half; the callers compose the
+    two. A named helper would have been a differently-named copy of a rule that
+    already existed twice, and the name was already taken.
+  - The five tiles still count every order, so they add up to the board. The
+    "Not started" tile's note carries the narrower number.
 - **`Line Leader` (the operator's name) is deliberately absent from the
   snapshot.** The mapper reads it and the board shows it, so it appears as soon
   as the app reads BC live; the snapshot is a file that leaves the server, and

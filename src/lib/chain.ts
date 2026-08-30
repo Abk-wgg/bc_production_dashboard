@@ -324,6 +324,40 @@ export function pickStateFor(
   return "some-missing";
 }
 
+/**
+ * How many component lines are still to pick, from BC's own picking fields.
+ *
+ * Deliberately NOT the stock maths above, and it answers a different question.
+ * Once the floor has started an order its components have been picked to it,
+ * which moves that stock out of inventory - so `shortagesFor` reads "none
+ * available" and says the exact opposite of the truth. That is why pick state
+ * is switched off entirely for started orders.
+ *
+ * The suppression hides something real, though: on the current board this puts
+ * a count on 31 started orders, 51 outstanding lines between them. This reads
+ * `Completely Picked` on the LINE, which survives the stock having moved and so
+ * still works after a Start. The 5405 header's copy of the same field reads
+ * false on all 94 started orders while those orders' own lines read true on 80%
+ * of themselves - the third case of a header and a line disagreeing, and the
+ * line being the one to trust.
+ *
+ * Only lines with something left to consume count, matching `pickStateFor`: a
+ * line already consumed is not outstanding work.
+ */
+export type PickProgress = {
+  /** Lines with something left to consume. */
+  total: number;
+  picked: number;
+  /** total - picked. The number the card puts in front of somebody. */
+  outstanding: number;
+};
+
+export function pickProgressFor(components: ComponentLine[]): PickProgress {
+  const live = components.filter((c) => c.remainingQuantity > 0);
+  const picked = live.filter((c) => c.completelyPicked).length;
+  return { total: live.length, picked, outstanding: live.length - picked };
+}
+
 /** Every order's pick state, keyed by production order number. */
 export function buildPickStateMap(
   componentsByOrder: Map<string, ComponentLine[]> | Record<string, ComponentLine[]>,

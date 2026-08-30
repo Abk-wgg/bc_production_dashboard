@@ -12,18 +12,20 @@ import { getItems, buildItemDescriptionMap } from "@/lib/bc/items";
 import {
   buildIncomingMap,
   pickStateFor,
+  pickProgressFor,
   buildProgressMap,
   buildSalesOrderMap,
   buildStockMap,
   shortagesFor,
   toComponentLine,
+  type PickProgress,
   type PickState,
 } from "@/lib/chain";
 import { buildFloorMap, countFloorStates, isOnTheLine, NOT_ON_THE_LINE } from "@/lib/floor";
 import Tiles from "@/components/tiles";
 import type { BoardOrder } from "@/lib/types";
 import { withWorkCenters } from "@/lib/work-center";
-import { today } from "@/lib/board";
+import { isLateToStart, today } from "@/lib/board";
 import type { ComponentLine, ProdOrderComponent } from "@/lib/types";
 
 export const metadata = { title: "Schedule" };
@@ -118,6 +120,19 @@ export default async function SchedulePage() {
       pickStateByOrder[orderNo] = pickStateFor(lines, stockByItem);
     }
   }
+
+  // The other half of the same question, for the orders the loop above skips.
+  // The stock maths cannot speak for a started order, but BC's own picking
+  // fields can - and they put 51 outstanding lines across 31 started orders in
+  // front of somebody, which nothing on the board said until now. Outside the
+  // `stock.partial` guard on purpose: this reads the component line, not the
+  // stock feed, so an incomplete stock snapshot has no bearing on it.
+  const pickProgressByOrder: Record<string, PickProgress> = {};
+  for (const orderNo of Object.keys(componentsByOrder)) {
+    if (!isOnTheLine(floor.get(orderNo)?.status ?? "not-started")) continue;
+    const progress = pickProgressFor(componentLinesByOrder[orderNo] ?? []);
+    if (progress.outstanding > 0) pickProgressByOrder[orderNo] = progress;
+  }
   // The tiles read the shop floor, not the stock. "Can this be picked" is a
   // question about the warehouse; "what is running right now" is the one the
   // person standing in front of this board is asking. Pick state still rides on
@@ -126,6 +141,16 @@ export default async function SchedulePage() {
     rows.map((order) => order.no),
     floor,
   );
+
+  // The tile still counts all five states over every order, so the five add up
+  // to the board. What the note adds is the subset the red pill now marks -
+  // untouched AND past the day it was meant to begin.
+  const asOf = today();
+  const overdueToStart = rows.filter(
+    (order) =>
+      !isOnTheLine(floor.get(order.no)?.status ?? "not-started") &&
+      isLateToStart(order, asOf),
+  ).length;
 
   return (
     <main className="page-schedule">
@@ -173,7 +198,7 @@ export default async function SchedulePage() {
               {
                 label: "Not started",
                 value: floorCounts["not-started"],
-                note: "No button press against this order at all",
+                note: `No button press at all — ${overdueToStart} of them past their planned start`,
               },
             ]}
           />
@@ -191,7 +216,8 @@ export default async function SchedulePage() {
             componentsByOrder={componentLinesByOrder}
             shortagesByOrder={shortagesByOrder}
             pickStateByOrder={pickStateByOrder}
-            asOf={today()}
+            pickProgressByOrder={pickProgressByOrder}
+            asOf={asOf}
           />
         </>
       )}
