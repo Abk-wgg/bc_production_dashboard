@@ -17,6 +17,7 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import type { Fetched } from "../types";
 import type { RawRow } from "./fields";
+import { readFeed } from "./workbook";
 
 export type { RawRow } from "./fields";
 
@@ -97,8 +98,10 @@ export function isConfigured(key: ServiceKey): boolean {
 // web-service form, so a snapshot goes through exactly the same mappers as live
 // data - what you see in a demo is what you will see live.
 //
-// Live credentials always win. The snapshot is only consulted when there are
-// none, so it can never silently mask a broken connection.
+// Precedence is live BC, then the warehouse workbooks (see workbook.ts), then
+// this. Live credentials always win, so no offline source can silently mask a
+// broken connection; and the workbook beats the snapshot because it is complete
+// where the snapshot is capped at 1000 rows a table.
 
 type Snapshot = {
   takenAt: string;
@@ -219,6 +222,18 @@ export async function fetchService(
   const fetchedAt = new Date().toISOString();
 
   if (!isConfigured(key)) {
+    // The BC warehouse workbooks hold complete extracts where the snapshot is
+    // capped at 1000 rows a table, so they win whenever one is configured.
+    const workbook = readFeed(key);
+    if (workbook) {
+      return {
+        source: "workbook",
+        fetchedAt,
+        takenAt: workbook.refreshedAt,
+        rows: workbook.rows,
+      };
+    }
+
     const snapshot = loadSnapshot();
     const rows = snapshot?.[key];
     if (rows) {

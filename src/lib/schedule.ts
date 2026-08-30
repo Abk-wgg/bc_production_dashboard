@@ -47,6 +47,32 @@ export function groupByDay<T extends OrderWithWorkCenter>(orders: T[]): DayGroup
     });
 }
 
+/**
+ * Which day the board should open on: today, or the next day that has work.
+ *
+ * Not the earliest day in the data. On real data that is a single stalled order
+ * from five months back - day 1 of 57, fifty clicks from the day the person
+ * actually came to look at. Landing on today hides nothing, because Previous
+ * still walks back through the entire backlog; it just starts you where the
+ * question "what runs today" is answered.
+ *
+ * If every day is in the past, open on the most recent one rather than the
+ * oldest - same reasoning. Unscheduled orders (NO_DATE) are never a landing
+ * place, since they sort last and answer a different question.
+ */
+export function initialDayIndex(days: { key: string }[], asOf: string): number {
+  let lastDated = -1;
+
+  for (let i = 0; i < days.length; i++) {
+    if (days[i].key === NO_DATE) continue;
+    // Days are sorted ascending, so the first one at or after today is the one.
+    if (days[i].key >= asOf) return i;
+    lastDated = i;
+  }
+
+  return lastDated === -1 ? 0 : lastDated;
+}
+
 export type WorkCenterColumn<T extends OrderWithWorkCenter = OrderWithWorkCenter> = {
   workCenter: string;
   category: WorkCenterCategory;

@@ -47,6 +47,9 @@ export async function GET() {
   return NextResponse.json({
     source: orders.source,
     fetchedAt: orders.fetchedAt,
+    // When the data itself was taken from BC, if it is not live. A consumer
+    // charting these rows needs to know they are an hour old, not seconds.
+    takenAt: orders.takenAt,
     count: rows.length,
     orders: rows,
   });

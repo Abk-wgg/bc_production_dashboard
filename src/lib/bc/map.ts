@@ -48,8 +48,11 @@ export function toProductionOrder(row: RawRow): ProductionOrder {
     salesOrderNo: toText(pick(row, "Sales_Order_No", "SalesOrderNo")),
     scheduled: toBool(pick(row, "NETVAPS_Scheduled", "NETVAPSScheduled")),
     completelyPicked: toBool(pick(row, "Completely_Picked", "CompletelyPicked")),
-    flavour: toText(pick(row, "Flavour")),
-    strength: toText(pick(row, "Strength")),
+    // This tenant carries flavour and strength as the first two of ten generic
+    // "Attribute ID" fields on 5405 - Attribute_ID_1 reads "Vmt", _2 reads
+    // "20Mg". The plain names are tried first in case a page ever exposes them.
+    flavour: toText(pick(row, "Flavour", "Attribute_ID_1", "AttributeID1")),
+    strength: toText(pick(row, "Strength", "Attribute_ID_2", "AttributeID2")),
     cartoned: toText(pick(row, "Cartoned")),
   };
 }
@@ -140,7 +143,9 @@ export function toStockLot(row: RawRow): StockLot {
     locationCode: toText(pick(row, "Location_Code", "LocationCode")),
     binCode: toText(pick(row, "Bin_Code", "BinCode")),
     quantity: toNumber(pick(row, "Quantity_Base", "QuantityBase")),
-    availableQuantity: toNumber(pick(row, "Avail_Qty_Base", "AvailQtyBase")),
+    availableQuantity: toNumber(
+      pick(row, "Avail_Qty_Base", "Available_Qty_Base", "AvailQtyBase"),
+    ),
     unitOfMeasureCode: toText(pick(row, "Base_Unit_of_Measure_Code", "BaseUnitofMeasureCode")),
     // "Available" is not on the published page. Absent means nothing is
     // blocking the lot, so default to available rather than hiding all stock.

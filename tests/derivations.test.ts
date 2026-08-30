@@ -11,7 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { buildWorkCenterMap, categorise, orderHasCategory, withWorkCenters } from "../src/lib/work-center.ts";
-import { groupByDay, toWorkCenterColumns, NO_DATE } from "../src/lib/schedule.ts";
+import { groupByDay, initialDayIndex, toWorkCenterColumns, NO_DATE } from "../src/lib/schedule.ts";
 import {
   isOutstanding,
   isBehindPlan,
@@ -182,6 +182,32 @@ test("an order takes the earliest start across its operations", () => {
     ],
   );
   assert.equal(row.scheduledStart, "2026-09-14");
+});
+
+test("the routing comes from the line, not the header that reads ERROR_ROUTE", () => {
+  // The header carries a Routing No. too, and it reads ERROR_ROUTE on 669 of
+  // 982 released orders where the lines for those same orders read it on 26.
+  const [row] = withWorkCenters(
+    [order({ no: "A", routingNo: "ERROR_ROUTE" })],
+    [line({ prodOrderNo: "A", routingNo: "10ML-UNCARTONED" })],
+  );
+  assert.equal(row.routingNo, "10ML-UNCARTONED");
+});
+
+test("an order with no routing line keeps its header routing rather than blanking", () => {
+  const [row] = withWorkCenters([order({ no: "A", routingNo: "ERROR_ROUTE" })], []);
+  assert.equal(row.routingNo, "ERROR_ROUTE");
+});
+
+test("PRINTING is excluded from the work centre but not from the routing", () => {
+  // The two questions differ: printing distorts "where does this run", but an
+  // order whose only line is a printing one is still on that line's routing.
+  const [row] = withWorkCenters(
+    [order({ no: "A", routingNo: "" })],
+    [line({ prodOrderNo: "A", no: "PRINTING", workCenterNo: "PRINTING", routingNo: "10ML-PROD-CARTON" })],
+  );
+  assert.equal(row.workCenter, "");
+  assert.equal(row.routingNo, "10ML-PROD-CARTON");
 });
 
 test("PRINTING does not schedule an order any more than it locates it", () => {
@@ -640,4 +666,64 @@ test("floor counts are taken over the orders on the board", () => {
 
   const counts = countFloorStates(["A", "B", "C"], floor);
   assert.deepEqual(counts, { running: 1, paused: 1, "qa-booked": 0, "not-started": 1 });
+});
+
+// --- which day the board opens on -------------------------------------------
+
+test("the board opens on today when today has work", () => {
+  const days = [{ key: "2026-08-28" }, { key: "2026-08-30" }, { key: "2026-09-01" }];
+  assert.equal(initialDayIndex(days, "2026-08-30"), 1);
+});
+
+test("with nothing today it opens on the next day that has work", () => {
+  const days = [{ key: "2026-08-28" }, { key: "2026-09-01" }];
+  assert.equal(initialDayIndex(days, "2026-08-30"), 1);
+});
+
+test("the earliest day is not a landing place just because it is first", () => {
+  // The real shape of this data: one stalled April order, then the actual work
+  // five months later. Opening on index 0 is fifty clicks from today.
+  const days = [{ key: "2026-04-02" }, { key: "2026-08-30" }, { key: "2026-09-01" }];
+  assert.equal(initialDayIndex(days, "2026-08-30"), 1);
+});
+
+test("when every day is in the past it opens on the most recent, not the oldest", () => {
+  const days = [{ key: "2026-04-02" }, { key: "2026-06-18" }];
+  assert.equal(initialDayIndex(days, "2026-08-30"), 1);
+});
+
+test("unscheduled orders are never the landing day", () => {
+  // NO_DATE sorts last and would compare greater than any ISO date as a string,
+  // so it has to be skipped explicitly rather than by ordering alone.
+  const days = [{ key: "2026-04-02" }, { key: NO_DATE }];
+  assert.equal(initialDayIndex(days, "2026-08-30"), 0);
+});
+
+test("an empty board does not blow up", () => {
+  assert.equal(initialDayIndex([], "2026-08-30"), 0);
+});
+
+// --- work centre classification ---------------------------------------------
+
+test("UNPLANNED is our own production, not trade", () => {
+  // It is work not yet assigned to a line, not work sent out. The PROD- prefix
+  // is a naming convention, and judging on it filed 236 orders - a quarter of
+  // the board - where nobody filtering to Production would ever see them.
+  assert.equal(categorise("UNPLANNED"), "production");
+  assert.equal(categorise("unplanned"), "production");
+  assert.equal(orderHasCategory("UNPLANNED", "production"), true);
+  assert.equal(orderHasCategory("UNPLANNED", "trade"), false);
+});
+
+test("OUTSIDE-LINE is trade - work we send out", () => {
+  assert.equal(categorise("OUTSIDE-LINE"), "trade");
+  assert.equal(orderHasCategory("OUTSIDE-LINE", "trade"), true);
+});
+
+test("every work centre in the real data lands where it belongs", () => {
+  // The ten centres actually present. Pinned so a change to the fallback rule
+  // cannot quietly move a quarter of the board again.
+  for (const wc of ["PROD-1", "PROD-2", "PROD-3", "PROD-4", "PROD-5", "PROD-6", "PROD-7", "PROD-SHORTFILL", "UNPLANNED"])
+    assert.equal(categorise(wc), "production", wc);
+  assert.equal(categorise("OUTSIDE-LINE"), "trade");
 });

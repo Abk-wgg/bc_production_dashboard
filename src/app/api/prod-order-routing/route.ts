@@ -12,6 +12,9 @@ export async function GET() {
   return NextResponse.json({
     source: routing.source,
     fetchedAt: routing.fetchedAt,
+    // When the data itself was taken from BC, if it is not live. A consumer
+    // charting these rows needs to know they are an hour old, not seconds.
+    takenAt: routing.takenAt,
     count: routing.rows.length,
     routingLines: routing.rows,
   });

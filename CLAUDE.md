@@ -30,14 +30,21 @@ The constraints are the design. Check any change against all of them at once.
   sessions, no database.
 - `output: "standalone"` — deploy by copying `.next/standalone`, `.next/static`
   and `public/` to the server and running `node server.js`.
-- Only runtime dependency beyond React/Next is `xlsx`, loaded on demand for the
-  Excel export.
+- Only runtime dependency beyond React/Next is `xlsx` — on demand in the browser
+  for the Excel export, and on the server to read the BC warehouse workbooks.
 
 ## Structure
 
 - `src/lib/bc/` — **the only code that talks to BC.** Every file is
   `server-only`. `client.ts` holds the token and the OData fetch; `orders.ts`,
   `components.ts` and `routing.ts` map one table each.
+- **Three data sources, in this order: live BC, then the warehouse workbooks
+  (`workbook.ts`), then the bundled snapshot.** Live credentials always win, so
+  no offline source can mask a broken connection. The workbook beats the
+  snapshot because it is complete where the snapshot is capped at 1000 rows a
+  table. All three go through the same mappers — the workbook columns are
+  already in published-web-service form, because Power Query pulled them from
+  the same web services.
 - `src/lib/types.ts` — row shapes. Deliberately outside `bc/`: a client
   component importing a type from a `server-only` module would drag the server
   code into the browser bundle.
@@ -52,13 +59,30 @@ The constraints are the design. Check any change against all of them at once.
 
 ## BC specifics
 
-Three published web services, all on the **Production** environment:
+Nine published web services, all on the **Production** environment. The first
+three drive the board; the rest fill in the chain around an order:
 
 | Table | What | Service name |
 |---|---|---|
 | 5405 | Production Order headers | `Production_Order_List_Excel` |
 | 5407 | Prod. Order Components | `prod_order_comp_with_pick` |
 | 5409 | Prod. Order Routing Lines | `Prod_Order_Routing_Excel` |
+| 50403 | Shop-floor button presses | `Prod_Order_Data_Entry_Excel` |
+| 5517495 | Lot-level stock | `Inventory_Summary_Excel` |
+| 39 | Purchase order lines | `Purchase_Order_Line_Excel` |
+| 36 | Sales orders | `sale_order_list_custom_ab` |
+| 37 | Sales lines | `Sales_Lines_Excel` |
+| 27 | Item master | `Item_Card_Excel` |
+
+Over 200 services are published in total, so almost anything else the business
+wants is already reachable without publishing something new.
+
+**More than one page is published over the same table**, with different field
+sets — 5409 has both `Prod_Order_Routing_Excel` and `Prod_Order_Routing_Lines_Excel`,
+5407 has `prod_order_comp_with_pick`, `Prod_Order_Comp_Lines_Excel` and
+`prod_comp_with_picked_qty`. They are not interchangeable: a `$select` naming a
+field the chosen page does not carry fails the whole request with a bare 400
+that never says which field. Check with `?$top=1` and no `$select` first.
 
 - **Routing lines are table 5409, not 5410.** 5410 is "Prod. Order Capacity
   Need". The earlier Power Apps prototype's AL page commented it as 5410 and got
@@ -76,7 +100,9 @@ so the tables, the schedule and the JSON feeds cannot disagree.
   outnumber production roughly fifteen to one.
 - **Components: manually flushed only** (`Flushing Method = Manual`, option 0).
   Forward and backward flushed lines are consumed by BC automatically, so nobody
-  works from them. In the current data this removes about 46% of component lines.
+  works from them. In the current data this removes 54% of released component
+  lines and keeps 46% — 1,957 of 4,259. (An earlier note had those the wrong way
+  round.)
 
 Both rules accept the option index or the caption, and an unreadable flushing
 method is treated as Manual — hiding a line because we could not parse it would
@@ -84,6 +110,20 @@ remove real work from the board.
 - **Work centre comes from the routing line, not the order.** Table 5405 has no
   work centre. `PRINTING` is excluded from the derived value — it runs on nearly
   every order, so including it would collapse the schedule into one column.
+- **Production vs Trade is an explicit list, not a name prefix.** Ten work
+  centres exist: `PROD-1` to `PROD-7`, `PROD-SHORTFILL`, `UNPLANNED` and
+  `OUTSIDE-LINE`. Only the last is trade — `UNPLANNED` is our own production,
+  work not yet assigned to a line rather than work sent out. The old
+  `startsWith("PROD")` rule filed its 236 orders under Trade, a quarter of the
+  board, invisible to anyone filtering to Production. The sets in
+  `work-center.ts` are the source of truth; the prefix is only a fallback, so
+  **a new work centre needs adding to one of them**.
+- **So does the routing number**, for a different reason: 5405 *does* carry one,
+  and it is wrong. The header reads `ERROR_ROUTE` on 669 of 982 released orders
+  where the lines for those same orders read it on 26. `buildRoutingNoMap` in
+  `work-center.ts` takes the line's value and falls back to the header only for
+  the 2 orders that have no routing line. PRINTING is **not** excluded there —
+  it distorts "where does this run", but not "which routing is this on".
 - **The whole board runs on planned dates, not due dates.** A production board
   answers "what runs when"; the due date answers "what is owed when". On all 982
   open orders the due date is simply the planned end plus a day (962 of them
@@ -91,13 +131,22 @@ remove real work from the board.
   would call a late order on time for a day.
   - The schedule groups on the routing line's `Starting Date`; the card shows
     the planned end, flagged red once it has passed.
+  - **It opens on today, not on day 1.** Two different questions get confused
+    here: what is *visible* and what you *land on*. The "from" filter stays off,
+    because defaulting it to today would hide the 394 orders whose planned start
+    has already passed — a schedule that silently omits every late order looks
+    reassuringly empty. But the landing day is today (or the next day with
+    work), because the earliest day in the data is a single stalled April order:
+    day 1 of 57, fifty clicks from the day anyone came to look at. Previous
+    still walks back through the whole backlog. `initialDayIndex` in
+    `schedule.ts`.
   - The Production orders table leads with **Planned start** and **Planned end**
     and sorts on planned start. "Behind plan" means past the planned end and not
     finished. The due date is still a column, well to the right — it is a real
     commitment, it just does not drive anything.
-  - The component "Due Date" (5407) is not a promise either: on every row checked
-    it is exactly the parent order's planned start, so the column is labelled
-    **Needed**.
+  - The component "Due Date" (5407) is not a promise either: it is the parent
+    order's planned start on 1,923 of 1,957 manually-flushed released lines, so
+    the column is labelled **Needed**. Nearly always, not always — 34 differ.
 - **`NETVAPS Earliest Start Date` and `NETVAPS EMAD` are empty** on all 980
   routing lines sampled — same trap as `Finished Quantity`. The VAPS output that
   *is* populated: `Starting Date`, `Ending Date`, and `NETVAPS Scheduled`
@@ -105,11 +154,22 @@ remove real work from the board.
 - OData renames fields when a page is published: `"Sales Order No."` arrives as
   `Sales_Order_No`. The mappers try several spellings rather than hard-coding
   one and rendering a column of blanks.
-- **`Finished Quantity` (5405) read 0 on every row sampled.** Treat it as
-  unpopulated, not as evidence nothing is finished. "Outstanding" is derived
-  from `status`, never from this field.
-- `NETVAPS Scheduled` exists on both 5405 and 5409. VAPS is the scheduling
-  add-on.
+- **`Finished Quantity` on the 5405 HEADER read 0 on every row sampled.** Treat
+  it as unpopulated, not as evidence nothing is finished. "Outstanding" is
+  derived from `status`, never from this field.
+  - **This is a header fact, not a table fact.** Real output does exist:
+    `Posted Output Quantity` on the 5409 routing line is populated on 403 of
+    1,340 lines and totals 795,468 for Released and 3,053,350 for Finished —
+    reconciling to the unit with `Finished Quantity` on the 5406 order *line*.
+    So the board can show genuine progress (8.4% of released volume made), not
+    just a status label. Same for routing: `Routing No.` on the header reads
+    `ERROR_ROUTE` on 669 of 982 orders, but on the routing line it is
+    `ERROR_ROUTE` on only 26 — a real issue a consultant is chasing, not a
+    two-thirds-of-the-board one. **When a field exists on both the header and
+    the line, trust the line.**
+- `NETVAPS Scheduled` exists on tables 5405, 5406 and 5409, but is **not exposed
+  by any of the pages currently published** over them, so it arrives false. VAPS
+  is the scheduling add-on.
 - **Floor status comes from the button presses, not a field.** BC has no "is
   this running" flag. Table 50403 (`Prod_Order_Data_Entry_Excel`) logs every
   press — Start, Pause, Restart, Complete, QA Book — and the order's state is

@@ -50,6 +50,9 @@ export async function GET(request: Request) {
   return NextResponse.json({
     source: components.source,
     fetchedAt: components.fetchedAt,
+    // When the data itself was taken from BC, if it is not live. A consumer
+    // charting these rows needs to know they are an hour old, not seconds.
+    takenAt: components.takenAt,
     count: rows.length,
     components: rows,
   });

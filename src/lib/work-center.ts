@@ -81,27 +81,85 @@ export function buildScheduledStartMap(
   return earliest;
 }
 
-/** Attaches the work centre and scheduled start date to each order. */
+/**
+ * Prod. Order No. -> the routing the order actually runs on.
+ *
+ * The 5405 header carries a `Routing No.` too, and it is not to be trusted: it
+ * reads ERROR_ROUTE on 669 of 982 released orders, where the routing LINES for
+ * those same orders read ERROR_ROUTE on only 26. Showing the header value put a
+ * broken-looking routing against two-thirds of the board and overstated a real
+ * but small data problem by roughly thirty times.
+ *
+ * PRINTING is NOT skipped here, unlike the two maps above. Those answer "where
+ * and when does this run", which printing would distort; this answers "which
+ * routing is this order on", and every line of an order shares that answer.
+ */
+export function buildRoutingNoMap(lines: ProdOrderRoutingLine[]): Map<string, string> {
+  const byOrder = new Map<string, Set<string>>();
+
+  for (const line of lines) {
+    if (!line.prodOrderNo || !line.routingNo) continue;
+    if (!byOrder.has(line.prodOrderNo)) byOrder.set(line.prodOrderNo, new Set());
+    byOrder.get(line.prodOrderNo)!.add(line.routingNo);
+  }
+
+  const map = new Map<string, string>();
+  for (const [order, routings] of byOrder) {
+    map.set(order, [...routings].sort().join(", "));
+  }
+  return map;
+}
+
+/** Attaches the work centre, scheduled start date and true routing to each order. */
 export function withWorkCenters(
   orders: ProductionOrder[],
   lines: ProdOrderRoutingLine[],
 ): OrderWithWorkCenter[] {
   const centres = buildWorkCenterMap(lines);
   const starts = buildScheduledStartMap(lines);
+  const routings = buildRoutingNoMap(lines);
 
   return orders.map((order) => ({
     ...order,
     workCenter: centres.get(order.no) ?? "",
     scheduledStart: starts.get(order.no) ?? null,
+    // Fall back to the header only when the order has no routing line at all -
+    // a wrong-looking value beats a blank one, and it is 2 orders in 982.
+    routingNo: routings.get(order.no) || order.routingNo,
   }));
 }
 
 export type WorkCenterCategory = "production" | "trade" | "unassigned";
 
-/** Centres starting PROD are our own production; anything else is trade. */
+/**
+ * Ours, despite not being named PROD-anything.
+ *
+ * `UNPLANNED` is our own production — work not yet assigned to a line, not work
+ * sent out. Judging it on the name filed 236 orders, a quarter of the board,
+ * under Trade, where anyone filtering to Production would never see them.
+ */
+const PRODUCTION_CENTERS = new Set(["UNPLANNED"]);
+
+/** Centres we send work out to rather than run ourselves. */
+const TRADE_CENTERS = new Set(["OUTSIDE-LINE"]);
+
+/**
+ * In-house or sent out?
+ *
+ * The PROD- prefix is a naming convention, not a rule, so the two sets above
+ * are the source of truth and the prefix is only a fallback for a centre
+ * neither knows about. **A new work centre needs adding to one of them** —
+ * otherwise it lands in whichever bucket its name happens to suggest, which is
+ * exactly how UNPLANNED ended up on the wrong side.
+ */
 export function categorise(workCenter: string): WorkCenterCategory {
   if (!workCenter || workCenter === UNASSIGNED) return "unassigned";
-  return workCenter.toUpperCase().startsWith("PROD") ? "production" : "trade";
+
+  const code = workCenter.toUpperCase();
+  if (PRODUCTION_CENTERS.has(code)) return "production";
+  if (TRADE_CENTERS.has(code)) return "trade";
+
+  return code.startsWith("PROD") ? "production" : "trade";
 }
 
 /** An order can span centres, so split before categorising. */

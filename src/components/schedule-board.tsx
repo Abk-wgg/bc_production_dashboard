@@ -7,7 +7,13 @@ import { completionOf, pickStateLabel, type PickState } from "@/lib/chain";
 import { RELEASED } from "@/lib/status";
 import { floorLabel, floorTone, isOnTheLine } from "@/lib/floor";
 import { formatDate, formatDayHeading, formatNumber } from "@/lib/format";
-import { groupByDay, locationsIn, toWorkCenterColumns, NO_DATE } from "@/lib/schedule";
+import {
+  groupByDay,
+  initialDayIndex,
+  locationsIn,
+  toWorkCenterColumns,
+  NO_DATE,
+} from "@/lib/schedule";
 import { UNASSIGNED, orderHasCategory } from "@/lib/work-center";
 
 // One colour per location so a card's origin is readable at a glance from
@@ -43,11 +49,14 @@ export default function ScheduleBoard({
 }) {
   const [category, setCategory] = useState<Category>(null);
   const [releasedOnly, setReleasedOnly] = useState(true);
-  // Starts at the earliest planned date, not today. Defaulting to today hides the
-  // backlog completely, and a production schedule that silently omits every
-  // late order is worse than useless - it looks reassuringly empty.
+  // The "from" filter stays off. Defaulting it to today would hide the backlog
+  // completely, and a production schedule that silently omits every late order
+  // is worse than useless - it looks reassuringly empty.
   const [from, setFrom] = useState("");
-  const [dayIndex, setDayIndex] = useState(0);
+  // Which day you LAND on is a separate question from what is visible, and
+  // nothing is hidden by it. Null means "not chosen yet", resolved below to
+  // today; once the user pages, their choice sticks.
+  const [dayIndex, setDayIndex] = useState<number | null>(null);
 
   const colourForLocation = useMemo(() => {
     const locations = locationsIn(orders);
@@ -71,9 +80,12 @@ export default function ScheduleBoard({
 
   const days = useMemo(() => groupByDay(visible), [visible]);
 
+  const defaultIndex = useMemo(() => initialDayIndex(days, asOf), [days, asOf]);
+
   // Filters can shrink the list under the current index, so clamp rather than
   // reset - staying near the day you were looking at is less disorienting.
-  const index = days.length === 0 ? 0 : Math.min(Math.max(dayIndex, 0), days.length - 1);
+  const index =
+    days.length === 0 ? 0 : Math.min(Math.max(dayIndex ?? defaultIndex, 0), days.length - 1);
   const day = days[index];
 
   const columns = useMemo(

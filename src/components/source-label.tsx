@@ -19,6 +19,13 @@ export function SourceStamp({ result }: { result: Fetched<unknown> }) {
   if (result.source === "business-central") {
     return <p className="stamp">Business Central · {timeOf(result.fetchedAt)}</p>;
   }
+  if (result.source === "workbook") {
+    return (
+      <p className="stamp">
+        BC warehouse · refreshed {result.takenAt ? dateOf(result.takenAt) : "unknown"}
+      </p>
+    );
+  }
   if (result.source === "snapshot") {
     return <p className="stamp">Snapshot · not live</p>;
   }
@@ -34,6 +41,23 @@ export function SourceStamp({ result }: { result: Fetched<unknown> }) {
  * mistaken for current.
  */
 export function SnapshotNotice({ result }: { result: Fetched<unknown> }) {
+  // The warehouse workbook is complete and refreshed on a schedule, so it needs
+  // a different warning from the snapshot's: the figures are real and whole,
+  // they are just as old as the last refresh rather than seconds old.
+  if (result.source === "workbook") {
+    return (
+      <div className="notice">
+        <h2>Refreshed on a schedule — not live</h2>
+        <p>
+          Read from the BC warehouse export, last refreshed{" "}
+          <strong>{result.takenAt ? dateOf(result.takenAt) : "at an unknown time"}</strong>. These
+          are complete figures, but they change only when that refresh runs — not as Business
+          Central changes.
+        </p>
+      </div>
+    );
+  }
+
   if (result.source !== "snapshot") return null;
 
   return (

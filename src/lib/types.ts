@@ -96,7 +96,7 @@ export type ProdOrderRoutingLine = {
  * - `not-configured` - a normal state, not an error: no credentials and no
  *   snapshot, so the page explains itself rather than throwing.
  */
-export type Source = "business-central" | "snapshot" | "not-configured";
+export type Source = "business-central" | "workbook" | "snapshot" | "not-configured";
 
 export type Fetched<T> = {
   source: Source;
@@ -104,7 +104,11 @@ export type Fetched<T> = {
   missing?: string;
   /** When the request was served. */
   fetchedAt: string;
-  /** When the snapshot was captured from BC, when source is "snapshot". */
+  /**
+   * When the data itself was taken from BC: the snapshot's capture time, or the
+   * warehouse workbook's last refresh. Always older than `fetchedAt`, and the
+   * figure that actually says how stale the board is.
+   */
   takenAt?: string;
   /**
    * True when this feed is known to be incomplete - a snapshot capped at 1000
