@@ -40,6 +40,11 @@
   /* Height of .site-header, which is sticky at top: 0. Anything else that
      sticks has to clear it or it pins underneath and vanishes. */
   --header-h: 54px;
+  /* A table head row. Both rows of the sticky thead are this tall, so the
+     filter row pins at 1x and anything sticking below the whole head - the
+     open panel's bar - clears 2x. Named rather than repeated, because the two
+     numbers have to move together or the panel bar hides under the filters. */
+  --thead-row-h: 34px;
   /* The deep header treatment. Navy rather than another grey, for a header
      that has to separate itself from the surface directly behind it: the
      schedule's pinned column headers, floating over cards that are the same
@@ -362,7 +367,12 @@ thead th {
   border-bottom: 1px solid var(--rule-strong);
 }
 thead tr:first-child th { top: 0; }
-thead tr:nth-child(2) th { top: 34px; padding: 4px 6px; background: var(--surface-2); }
+thead tr:nth-child(2) th {
+  top: var(--thead-row-h);
+  padding: 4px 6px;
+  background: var(--surface-2);
+  height: var(--thead-row-h);
+}
 /* The filter row. A column with few enough distinct values gets a dropdown of
    them; the rest keep a text box. Both are sized the same so the row reads as
    one control repeated, not two kinds of thing. */
@@ -452,6 +462,63 @@ input.unparsed:focus-visible { outline-color: var(--crit); }
 
 /* The expression the row will write. Monospace, and to the right, so the menu
    reads as label-then-what-it-types rather than as two columns of words. */
+/* The open panel's header, pinned.
+
+   A big vendor is 99 items, which is several screens: without this the vendor's
+   name, the shortage count and any way back out have all scrolled off, and the
+   only route back is a long drag upwards. It sticks below BOTH rows of the
+   outer table head - hence 2x --thead-row-h - because those are pinned too and
+   it would otherwise slide underneath them. */
+.panel-bar {
+  position: sticky;
+  top: calc(var(--thead-row-h) * 2);
+  z-index: 3;
+  /* Pulled up over the panel's own top padding so nothing shows above it when
+     it pins, and opaque in the PANEL's colour rather than the table's - the
+     rows scroll underneath it. */
+  margin: -13px -16px 10px;
+  padding: 11px 16px 9px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--rule-strong);
+}
+
+.panel-head { display: flex; align-items: center; gap: 7px; }
+.panel-head h3 { margin: 0; }
+
+/* The plus and minus in front of the vendor name. Square, so the two read as
+   one control rather than as two words of different lengths. */
+.pm {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 600;
+  border-radius: 5px;
+}
+
+/* The row's own toggle: the same plus and minus, in the other state. Bigger
+   than the triangles it replaced, because a 9px minus sign is a smudge. */
+td.exp .caret { font-size: 14px; font-weight: 600; }
+
+.panel-tools {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+/* The shortage pill is a button now. It keeps the pill's shape so it still
+   reads as the same object, and gains the pressed state a control needs. */
+button.pill { cursor: pointer; font: inherit; font-size: 11.5px; font-weight: 600; }
+button.pill.late.on {
+  background: var(--crit);
+  border-color: var(--crit);
+  color: var(--plane);
+}
+
 /* A quantity in more than one unit, stacked so neither reads as the total. */
 .mixed { display: flex; flex-direction: column; gap: 1px; line-height: 1.3; }
 .uom { color: var(--muted); font-size: 11.5px; }
@@ -463,7 +530,7 @@ input.unparsed:focus-visible { outline-color: var(--crit); }
 table.cmp tr.itm { cursor: pointer; }
 table.cmp tr.itm:hover > td { background: var(--surface-2); }
 table.cmp tr.itm.open > td { background: var(--accent-soft); }
-table.cmp tr.itm .caret { color: var(--muted); font-size: 9px; }
+table.cmp tr.itm .caret { color: var(--muted); font-size: 13px; font-weight: 600; }
 table.cmp tr.itm.open .caret { color: var(--accent); }
 table.cmp td.strong { font-weight: 600; }
 

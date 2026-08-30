@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import DataTable, { type Column } from "@/components/data-table";
+import DataTable, { type Column, type ExportSheet } from "@/components/data-table";
 import DateFilterBox from "@/components/date-filter-box";
 import VendorWeekPanel from "@/components/vendor-week-panel";
 import {
@@ -12,6 +12,7 @@ import {
   type VendorWeek,
 } from "@/lib/vendor-weeks";
 import { isShort } from "@/lib/component-groups";
+import { groupLinesByItem } from "@/lib/item-groups";
 import { parseDateFilter } from "@/lib/date-filter";
 import { compactQuantity, formatNumber, formatWeekRange } from "@/lib/format";
 import {
@@ -199,9 +200,74 @@ export default function VendorWeeksBoard({
   // Stable, so DataTable's memoised rows survive a panel opening. An inline
   // arrow here is a new function every render, which invalidates all of them.
   const renderPanel = useCallback(
-    (row: VendorWeek) => <VendorWeekPanel group={row} stockKnown={stockKnown} />,
+    (row: VendorWeek, close: () => void) => (
+      <VendorWeekPanel group={row} stockKnown={stockKnown} onClose={close} />
+    ),
     [stockKnown],
   );
+
+  /**
+   * The two levels under each row, as their own sheets.
+   *
+   * Built from the rows the export is writing, NOT from this component's own
+   * `rows` - the column filters live inside DataTable, so filtering to one
+   * vendor has to reach the detail sheets too or the workbook contradicts
+   * itself. Filter the Vendor column, export, and all three sheets are that
+   * vendor.
+   *
+   * Dates go out as ISO rather than "31 Aug 2026", because these sheets exist
+   * to be sorted and pivoted and a formatted date is text that sorts
+   * alphabetically - the summary sheet has no date column of its own, so
+   * nothing in the workbook disagrees.
+   */
+  const exportExtra = useCallback((visible: VendorWeek[]): ExportSheet[] => {
+    const items: ExportSheet["rows"] = [];
+    const lines: ExportSheet["rows"] = [];
+
+    for (const row of visible) {
+      const vendor = row.vendorNo ? row.vendorName : "No vendor set";
+      for (const item of groupLinesByItem(row.lines, stockKnown)) {
+        items.push({
+          "Vendor No.": row.vendorNo,
+          Vendor: vendor,
+          Week: row.weekNo,
+          "Week starting": row.weekStart,
+          "Item No.": item.itemNo,
+          Description: item.description,
+          UoM: item.unitOfMeasureCode,
+          Orders: item.orderCount,
+          Needed: item.earliestNeeded ?? "",
+          Quantity: item.remaining,
+          "In Stock": stockKnown ? item.available : "",
+          "Short By": stockKnown ? item.shortBy : "",
+          "Next Delivery": item.nextReceipt ?? "",
+        });
+
+        for (const line of item.lines) {
+          lines.push({
+            "Vendor No.": row.vendorNo,
+            Vendor: vendor,
+            Week: row.weekNo,
+            "Week starting": row.weekStart,
+            "Prod. Order No.": line.prodOrderNo,
+            "Item No.": line.itemNo,
+            Description: line.description,
+            "Work Center": line.workCenter,
+            UoM: line.unitOfMeasureCode,
+            Needed: line.dueDate ?? "",
+            Quantity: line.remainingQuantity,
+            Picked: line.qtyPicked,
+            "Fully Picked": line.completelyPicked ? "Yes" : "No",
+          });
+        }
+      }
+    }
+
+    return [
+      { name: "Items", rows: items },
+      { name: "Lines", rows: lines },
+    ];
+  }, [stockKnown]);
 
   // Counted for this week only - the button says what it will hide here, and a
   // count from the whole board would not match what removing it does.
@@ -296,6 +362,7 @@ export default function VendorWeeksBoard({
         emptyMessage="No component lines this week for the current filters."
         defaultSort={{ key: "lineCount", dir: "desc" }}
         expand={renderPanel}
+        exportExtra={exportExtra}
         asOf={asOf}
         toolbar={
           <>

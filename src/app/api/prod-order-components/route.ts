@@ -8,6 +8,7 @@ import { getProdOrderRoutingLines } from "@/lib/bc/routing";
 import { getProductionOrders } from "@/lib/bc/orders";
 import { getStock } from "@/lib/bc/inventory";
 import { getOpenPurchaseLines } from "@/lib/bc/purchasing";
+import { getItems, buildItemDescriptionMap } from "@/lib/bc/items";
 import { buildWorkCenterMap } from "@/lib/work-center";
 import { buildIncomingMap, buildStockMap } from "@/lib/chain";
 import type { FeedComponent } from "@/lib/types";
@@ -15,18 +16,22 @@ import type { FeedComponent } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  const [components, routing, orders, stock, purchases] = await Promise.all([
+  const [components, routing, orders, stock, purchases, items] = await Promise.all([
     getProdOrderComponents(),
     getProdOrderRoutingLines(),
     getProductionOrders(),
     getStock(),
     getOpenPurchaseLines(),
+    getItems(),
   ]);
 
   const workCenters = buildWorkCenterMap(routing.rows);
   const stockByItem = buildStockMap(stock.rows);
   const incomingByItem = buildIncomingMap(purchases.rows);
   const onBoard = new Set(orders.rows.map((o) => o.no));
+  // Descriptions for the 8% of component lines BC left blank - see
+  // buildItemDescriptionMap.
+  const itemDescriptions = buildItemDescriptionMap(items.rows);
 
   let rows: FeedComponent[] = components.rows
     .filter((component) => onBoard.has(component.prodOrderNo))
@@ -35,6 +40,7 @@ export async function GET(request: Request) {
       const coming = incomingByItem.get(component.itemNo);
       return {
         ...component,
+        description: component.description || itemDescriptions.get(component.itemNo) || "",
         workCenter: workCenters.get(component.prodOrderNo) ?? "",
         available: held?.available ?? 0,
         earliestExpiry: held?.earliestExpiry ?? null,

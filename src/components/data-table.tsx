@@ -1,7 +1,16 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { pageWindow } from "@/lib/paging";
+import { exportFileName } from "@/lib/format";
 import DateFilterBox from "@/components/date-filter-box";
 import { parseDateFilter } from "@/lib/date-filter";
 
@@ -51,6 +60,21 @@ export type Column<T> = {
 type SortState = { key: string; dir: "asc" | "desc" };
 
 /**
+ * An extra sheet in the Excel export.
+ *
+ * A grouped table's rows are summaries, and a summary is not what someone
+ * downloads a spreadsheet to get. The detail behind the rows goes in sheets of
+ * its own rather than replacing the summary, because both answer real
+ * questions - one is what is on screen, the other is what you pivot.
+ */
+export type ExportSheet = {
+  /** Sheet tab name. Excel caps these at 31 characters. */
+  name: string;
+  /** One record per row; the keys become the header. */
+  rows: Record<string, string | number>[];
+};
+
+/**
  * Rows on a page.
  *
  * The board's tables run to 703 and 982 rows, and the cost of a table is paid
@@ -79,6 +103,7 @@ export default function DataTable<T>({
   expand,
   asOf,
   defaultSort = null,
+  exportExtra,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -97,10 +122,28 @@ export default function DataTable<T>({
    * Detail panel for a row. Supplying it makes every row expandable: a caret
    * appears at the left and clicking anywhere in the row opens the panel
    * underneath. Left out, the table behaves exactly as before.
+   *
+   * `close` collapses the row AND scrolls it back into view. A long panel is
+   * taller than the window, so collapsing one from the bottom of it removes
+   * thousands of pixels below the scroll position and drops the reader
+   * somewhere arbitrary. Panels that run to a screenful should offer it.
    */
-  expand?: (row: T) => ReactNode;
+  expand?: (row: T, close: () => void) => ReactNode;
   /** Sort applied before the user touches a header. */
   defaultSort?: SortState | null;
+  /**
+   * Extra sheets for the Excel export - the detail behind the rows.
+   *
+   * Called with the rows the export is actually writing: filtered, sorted, and
+   * every page of them. Passing them in rather than letting the caller reach
+   * for its own copy is what makes the sheets agree - filter the table to one
+   * vendor and the detail sheets hold that vendor only, so the download is
+   * already the thing you were going to send.
+   *
+   * A function, not a value, so building them costs nothing until someone
+   * actually exports.
+   */
+  exportExtra?: (rows: T[]) => ExportSheet[];
 }) {
   const [filter, setFilter] = useState("");
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
@@ -255,7 +298,22 @@ export default function DataTable<T>({
     const book = XLSX.utils.book_new();
     // Excel caps sheet names at 31 characters.
     XLSX.utils.book_append_sheet(book, sheet, exportName.slice(0, 31));
-    XLSX.writeFile(book, `${exportName}-${new Date().toISOString().slice(0, 10)}.xlsx`);
+
+    // The detail behind the rows, when the table has any. Empty sheets are
+    // skipped rather than shipped as a tab with nothing but a header.
+    for (const extra of exportExtra?.(sorted) ?? []) {
+      if (extra.rows.length === 0) continue;
+      XLSX.utils.book_append_sheet(
+        book,
+        XLSX.utils.json_to_sheet(extra.rows),
+        extra.name.slice(0, 31),
+      );
+    }
+
+    XLSX.writeFile(
+      book,
+      exportFileName(exportName, activeFilters, new Date().toISOString().slice(0, 10)),
+    );
   }
 
   // Stable identity, so the memoised rows below are not invalidated by it on
@@ -269,6 +327,23 @@ export default function DataTable<T>({
   }, []);
 
   const hasColumnFilters = Object.values(columnFilters).some((v) => v.trim() !== "");
+
+  /**
+   * What is narrowing the table, in column order, for the file name.
+   *
+   * In column order rather than the order they were typed, so the same two
+   * filters always produce the same file name however you arrived at them.
+   */
+  const activeFilters = useMemo(() => {
+    const parts: string[] = [];
+    for (const column of columns) {
+      const value = (columnFilters[column.key] ?? "").trim();
+      if (value) parts.push(value);
+    }
+    const query = filter.trim();
+    if (query) parts.push(query);
+    return parts;
+  }, [columns, columnFilters, filter]);
 
   return (
     <>
@@ -465,8 +540,18 @@ function TableRowInner<T>({
   columns: Column<T>[];
   isOpen: boolean;
   onToggle: (key: string) => void;
-  expand?: (row: T) => ReactNode;
+  expand?: (row: T, close: () => void) => ReactNode;
 }) {
+  const rowRef = useRef<HTMLTableRowElement>(null);
+
+  // Scroll first, then collapse. Anchoring on the row before the panel
+  // disappears is what stops the browser clamping the scroll position to the
+  // new, much shorter document.
+  const close = useCallback(() => {
+    rowRef.current?.scrollIntoView({ block: "nearest" });
+    onToggle(rowId);
+  }, [onToggle, rowId]);
+
   const cells = columns.map((column) => (
     <td
       key={column.key}
@@ -487,6 +572,7 @@ function TableRowInner<T>({
   return (
     <>
       <tr
+        ref={rowRef}
         className={isOpen ? "ord open" : "ord"}
         tabIndex={0}
         role="button"
@@ -505,13 +591,16 @@ function TableRowInner<T>({
         }}
       >
         <td className="exp">
-          <span className="caret">{isOpen ? "▼" : "▶"}</span>
+          {/* One symbol, never two: plus when there is more to see, minus when
+              there is not. A triangle says "this rotates"; a plus and a minus
+              say what pressing them will do. */}
+          <span className="caret">{isOpen ? "−" : "+"}</span>
         </td>
         {cells}
       </tr>
       {isOpen && (
         <tr className="det">
-          <td colSpan={columns.length + 1}>{expand(row)}</td>
+          <td colSpan={columns.length + 1}>{expand(row, close)}</td>
         </tr>
       )}
     </>

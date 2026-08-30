@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import DataTable, { type Column } from "@/components/data-table";
+import DataTable, { type Column, type ExportSheet } from "@/components/data-table";
 import OrderComponentsPanel from "@/components/order-components-panel";
 import type { BoardComponent } from "@/lib/types";
 import { groupByOrder, isShort, type OrderComponents } from "@/lib/component-groups";
@@ -128,6 +128,42 @@ export default function ComponentsTable({
     return groupByOrder(lines, stockKnown);
   }, [components, outstandingOnly, shortOnly, stockKnown, order]);
 
+  /**
+   * The component lines behind each order, as a second sheet.
+   *
+   * The table groups 1,957 lines into 703 orders, so without this the download
+   * is 703 summaries and the line detail is only reachable through the JSON
+   * feed. Built from the rows the export is writing, so a column filter
+   * narrows this sheet with it.
+   */
+  const exportExtra = useCallback(
+    (visible: OrderComponents[]): ExportSheet[] => [
+      {
+        name: "Lines",
+        rows: visible.flatMap((group) =>
+          group.lines.map((line) => ({
+            "Prod. Order No.": line.prodOrderNo,
+            "Line No.": line.lineNo,
+            "Item No.": line.itemNo,
+            Description: line.description,
+            "Work Center": line.workCenter,
+            Location: line.locationCode,
+            UoM: line.unitOfMeasureCode,
+            Needed: line.dueDate ?? "",
+            Expected: line.expectedQuantity,
+            Remaining: line.remainingQuantity,
+            Picked: line.qtyPicked,
+            "Fully Picked": line.completelyPicked ? "Yes" : "No",
+            "In Stock": stockKnown ? line.available : "",
+            "Next Delivery": line.nextReceipt ?? "",
+            Expires: line.earliestExpiry ?? "",
+          })),
+        ),
+      },
+    ],
+    [stockKnown],
+  );
+
   // Stable, so DataTable's memoised rows survive a panel opening. An inline
   // arrow here is a new function every render, which invalidates all of them.
   const renderPanel = useCallback(
@@ -144,6 +180,7 @@ export default function ComponentsTable({
       emptyMessage="No production orders match the current view."
       defaultSort={{ key: "prodOrderNo", dir: "asc" }}
       expand={renderPanel}
+      exportExtra={exportExtra}
       toolbar={
         <>
           <button

@@ -8,6 +8,7 @@ import { getOutputEvents } from "@/lib/bc/output";
 import { getSalesOrders } from "@/lib/bc/sales";
 import { getStock } from "@/lib/bc/inventory";
 import { getOpenPurchaseLines } from "@/lib/bc/purchasing";
+import { getItems, buildItemDescriptionMap } from "@/lib/bc/items";
 import {
   buildIncomingMap,
   pickStateFor,
@@ -28,16 +29,21 @@ import type { ComponentLine, ProdOrderComponent } from "@/lib/types";
 export const dynamic = "force-dynamic";
 
 export default async function SchedulePage() {
-  const [orders, routing, components, output, sales, stock, purchases] = await Promise.all([
-    getProductionOrders(),
-    getProdOrderRoutingLines(),
-    getProdOrderComponents(),
-    getOutputEvents(),
-    getSalesOrders(),
-    getStock(),
-    getOpenPurchaseLines(),
-  ]);
+  const [orders, routing, components, output, sales, stock, purchases, items] =
+    await Promise.all([
+      getProductionOrders(),
+      getProdOrderRoutingLines(),
+      getProdOrderComponents(),
+      getOutputEvents(),
+      getSalesOrders(),
+      getStock(),
+      getOpenPurchaseLines(),
+      getItems(),
+    ]);
 
+  // Descriptions for the 8% of component lines BC left blank - see
+  // buildItemDescriptionMap.
+  const itemDescriptions = buildItemDescriptionMap(items.rows);
   const progress = buildProgressMap(output.rows);
   const floor = buildFloorMap(output.rows);
   const salesOrders = buildSalesOrderMap(sales.rows);
@@ -71,7 +77,9 @@ export default async function SchedulePage() {
   // shortage and pick-state maths below still wants them.
   const componentLinesByOrder: Record<string, ComponentLine[]> = {};
   for (const [orderNo, lines] of Object.entries(componentsByOrder)) {
-    componentLinesByOrder[orderNo] = lines.map(toComponentLine);
+    componentLinesByOrder[orderNo] = lines.map((line) =>
+      toComponentLine(line, itemDescriptions),
+    );
   }
 
   // Which orders cannot be made right now, and how many lines are short.

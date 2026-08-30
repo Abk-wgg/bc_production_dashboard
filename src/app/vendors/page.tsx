@@ -6,7 +6,7 @@ import { getProductionOrders } from "@/lib/bc/orders";
 import { getProdOrderRoutingLines } from "@/lib/bc/routing";
 import { getStock } from "@/lib/bc/inventory";
 import { getOpenPurchaseLines } from "@/lib/bc/purchasing";
-import { getItems, buildItemVendorMap } from "@/lib/bc/items";
+import { getItems, buildItemVendorMap, buildItemDescriptionMap } from "@/lib/bc/items";
 import { getVendors, buildVendorNameMap } from "@/lib/bc/vendors";
 import { buildScheduledStartMap, buildWorkCenterMap } from "@/lib/work-center";
 import { buildIncomingMap, buildStockMap, toBoardComponent } from "@/lib/chain";
@@ -43,6 +43,9 @@ export default async function VendorsPage() {
   // vendor set and get their own row rather than disappearing.
   const vendorByItem = buildItemVendorMap(items.rows);
   const nameByVendor = buildVendorNameMap(vendors.rows);
+  // Descriptions for the 8% of component lines BC left blank - see
+  // buildItemDescriptionMap.
+  const itemDescriptions = buildItemDescriptionMap(items.rows);
 
   const board = components.rows
     .filter((component) => onBoard.has(component.prodOrderNo))
@@ -52,6 +55,7 @@ export default async function VendorsPage() {
         workCenters.get(component.prodOrderNo) ?? "",
         stockByItem,
         incomingByItem,
+        itemDescriptions,
       ),
     );
 

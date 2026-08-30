@@ -118,3 +118,43 @@ function trim(value: number, places: number): string {
   const fixed = value.toFixed(places);
   return places === 0 ? fixed : fixed.replace(/\.?0+$/, "");
 }
+
+/** How much of one filter value the file name will carry. */
+const NAME_PART = 28;
+/** How many filters it will name before giving up and saying "filtered". */
+const NAME_PARTS = 2;
+
+/**
+ * The export's file name, carrying whatever narrowed it.
+ *
+ * A workbook filtered to one supplier and called `vendors-2026-08-24.xlsx` is
+ * awkward to send on - the recipient cannot tell from the name what is inside,
+ * and two of them in a downloads folder are indistinguishable. Naming the
+ * filter makes the download the thing you were going to send.
+ *
+ * Only the values, not the column they came from: a vendor name says what it
+ * is, and "Vendor-Advance-Flavour-Solutions" only says it twice. Past two
+ * filters it stops listing and says `filtered`, because a file name that
+ * needs scrolling is no more use than one that says nothing.
+ *
+ * Everything outside A-Z, 0-9 becomes a hyphen - Windows rejects half of
+ * punctuation in a file name, and a vendor called "Sone Products Ltd." would
+ * otherwise ship a full stop into the middle of one.
+ */
+export function exportFileName(base: string, filters: string[], on: string): string {
+  const slugs = filters
+    .map((value) =>
+      value
+        .trim()
+        .replace(/[^A-Za-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, NAME_PART)
+        .replace(/-+$/, ""),
+    )
+    .filter((slug) => slug !== "");
+
+  const middle =
+    slugs.length === 0 ? "" : slugs.length > NAME_PARTS ? "-filtered" : `-${slugs.join("-")}`;
+
+  return `${base}${middle}-${on}.xlsx`;
+}

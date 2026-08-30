@@ -178,14 +178,25 @@ export type Shortage = {
  * HTML of three pages - and a spread will not warn you, because excess property
  * checks do not apply to it.
  */
-export function toComponentLine(component: ProdOrderComponent): ComponentLine {
+export function toComponentLine(
+  component: ProdOrderComponent,
+  /**
+   * Item No. to description, for the 8% of lines BC left blank.
+   *
+   * Required rather than optional on purpose: a page that forgot to pass it
+   * would show a column of empty descriptions and look like it was working.
+   */
+  descriptions: ReadonlyMap<string, string>,
+): ComponentLine {
   return {
     prodOrderNo: component.prodOrderNo,
     prodOrderLineNo: component.prodOrderLineNo,
     lineNo: component.lineNo,
     status: component.status,
     itemNo: component.itemNo,
-    description: component.description,
+    // The line's own copy first - it is what BC printed on the works order -
+    // and the item card only where that copy is blank.
+    description: component.description || descriptions.get(component.itemNo) || "",
     unitOfMeasureCode: component.unitOfMeasureCode,
     remainingQuantity: component.remainingQuantity,
     expectedQuantity: component.expectedQuantity,
@@ -202,11 +213,12 @@ export function toBoardComponent(
   workCenter: string,
   stock: Map<string, ItemStock>,
   incoming: Map<string, ItemIncoming>,
+  descriptions: ReadonlyMap<string, string>,
 ): BoardComponent {
   const held = stock.get(component.itemNo);
   const coming = incoming.get(component.itemNo);
   return {
-    ...toComponentLine(component),
+    ...toComponentLine(component, descriptions),
     workCenter,
     available: held?.available ?? 0,
     earliestExpiry: held?.earliestExpiry ?? null,

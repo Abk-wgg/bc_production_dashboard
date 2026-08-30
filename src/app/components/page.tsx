@@ -7,6 +7,7 @@ import { getProdOrderRoutingLines } from "@/lib/bc/routing";
 import { buildWorkCenterMap } from "@/lib/work-center";
 import { getStock } from "@/lib/bc/inventory";
 import { getOpenPurchaseLines } from "@/lib/bc/purchasing";
+import { getItems, buildItemDescriptionMap } from "@/lib/bc/items";
 import { buildIncomingMap, buildStockMap, toBoardComponent } from "@/lib/chain";
 import type { BoardComponent } from "@/lib/types";
 
@@ -17,13 +18,14 @@ export default async function ComponentsPage({
 }: {
   searchParams: Promise<{ order?: string }>;
 }) {
-  const [{ order }, components, routing, orders, stock, purchases] = await Promise.all([
+  const [{ order }, components, routing, orders, stock, purchases, items] = await Promise.all([
     searchParams,
     getProdOrderComponents(),
     getProdOrderRoutingLines(),
     getProductionOrders(),
     getStock(),
     getOpenPurchaseLines(),
+    getItems(),
   ]);
 
   // Components carry no work centre of their own - it belongs to the parent
@@ -41,6 +43,9 @@ export default async function ComponentsPage({
   // to say which order a delivery is earmarked for.
   const stockByItem = buildStockMap(stock.rows);
   const incomingByItem = buildIncomingMap(purchases.rows);
+  // Descriptions for the 8% of component lines BC left blank - see
+  // buildItemDescriptionMap.
+  const itemDescriptions = buildItemDescriptionMap(items.rows);
 
   // toBoardComponent, not a spread: what is listed there is what gets
   // serialised into the HTML, once for each of these rows.
@@ -52,6 +57,7 @@ export default async function ComponentsPage({
         workCenters.get(component.prodOrderNo) ?? "",
         stockByItem,
         incomingByItem,
+        itemDescriptions,
       ),
     );
 

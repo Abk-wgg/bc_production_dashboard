@@ -9,6 +9,7 @@ import { getOutputEvents } from "@/lib/bc/output";
 import { getSalesOrders } from "@/lib/bc/sales";
 import { getStock } from "@/lib/bc/inventory";
 import { getOpenPurchaseLines } from "@/lib/bc/purchasing";
+import { getItems, buildItemDescriptionMap } from "@/lib/bc/items";
 import {
   buildIncomingMap,
   buildProgressMap,
@@ -28,15 +29,17 @@ export const dynamic = "force-dynamic";
 
 export default async function OrdersPage() {
   // Every feed is independent, so ask for them at once rather than in series.
-  const [orders, routing, components, output, sales, stock, purchases] = await Promise.all([
-    getProductionOrders(),
-    getProdOrderRoutingLines(),
-    getProdOrderComponents(),
-    getOutputEvents(),
-    getSalesOrders(),
-    getStock(),
-    getOpenPurchaseLines(),
-  ]);
+  const [orders, routing, components, output, sales, stock, purchases, items] =
+    await Promise.all([
+      getProductionOrders(),
+      getProdOrderRoutingLines(),
+      getProdOrderComponents(),
+      getOutputEvents(),
+      getSalesOrders(),
+      getStock(),
+      getOpenPurchaseLines(),
+      getItems(),
+    ]);
 
   const asOf = today();
   const progress = buildProgressMap(output.rows);
@@ -62,6 +65,9 @@ export default async function OrdersPage() {
   const workCenters = buildWorkCenterMap(routing.rows);
   const stockByItem = buildStockMap(stock.rows);
   const incomingByItem = buildIncomingMap(purchases.rows);
+  // Descriptions for the 8% of component lines BC left blank - see
+  // buildItemDescriptionMap.
+  const itemDescriptions = buildItemDescriptionMap(items.rows);
   const onBoard = new Set(orders.rows.map((o) => o.no));
 
   // A plain object, not a Map - Maps do not survive the server/client boundary.
@@ -74,6 +80,7 @@ export default async function OrdersPage() {
         workCenters.get(component.prodOrderNo) ?? "",
         stockByItem,
         incomingByItem,
+        itemDescriptions,
       ),
     );
   }

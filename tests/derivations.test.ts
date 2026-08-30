@@ -45,6 +45,7 @@ import {
   formatLineNo,
   formatWeekRange,
   compactQuantity,
+  exportFileName,
 } from "../src/lib/format.ts";
 import { safeCallbackUrl } from "../src/lib/safe-redirect.ts";
 import { groupByOrder, isShort, shortfallOf } from "../src/lib/component-groups.ts";
@@ -80,6 +81,7 @@ import {
   pickStateFor,
   countPickStates,
   buildPickStateMap,
+  toComponentLine,
 } from "../src/lib/chain.ts";
 import type {
   ProductionOrder,
@@ -1709,4 +1711,89 @@ test("every value reads at about three significant figures", () => {
   // and that difference does not change a decision.
   assert.notEqual(compactQuantity(621073, "EACH"), compactQuantity(622000, "EACH"));
   assert.notEqual(compactQuantity(35248, "EACH"), compactQuantity(35900, "EACH"));
+});
+
+// --- component descriptions -------------------------------------------------
+
+test("a component line with no description borrows the item's", () => {
+  // BC copies the item's description onto the line when the line is created,
+  // and on 147 of 1,957 lines that copy is blank while the item card has one
+  // for every single item involved. A blank there is a stale copy, not a
+  // missing name, so the column should not be empty.
+  const line = toComponentLine(
+    comp({ itemNo: "RMC/109839", description: "" }) as never,
+    new Map([["RMC/109839", "BAX CARAMEL TOBACCO 20MG CARTON"]]),
+  );
+  assert.equal(line.description, "BAX CARAMEL TOBACCO 20MG CARTON");
+});
+
+test("the line's own description wins when it has one", () => {
+  // It is what BC printed on the works order, so the floor is reading it.
+  const line = toComponentLine(
+    comp({ itemNo: "RMC/1", description: "AS PRINTED" }) as never,
+    new Map([["RMC/1", "AS ON THE ITEM CARD"]]),
+  );
+  assert.equal(line.description, "AS PRINTED");
+});
+
+test("an item missing from the map leaves a blank, not undefined", () => {
+  const line = toComponentLine(comp({ description: "" }) as never, new Map());
+  assert.equal(line.description, "");
+});
+
+// --- export file names ------------------------------------------------------
+
+test("an unfiltered export keeps the plain name", () => {
+  assert.equal(
+    exportFileName("vendors-2026-08-24", [], "2026-08-30"),
+    "vendors-2026-08-24-2026-08-30.xlsx",
+  );
+});
+
+test("a filtered export names what narrowed it", () => {
+  // The point: a workbook holding one supplier should say so, or two of them
+  // in a downloads folder are indistinguishable.
+  assert.equal(
+    exportFileName("vendors-2026-08-24", ["Advance Flavour Solutions"], "2026-08-30"),
+    "vendors-2026-08-24-Advance-Flavour-Solutions-2026-08-30.xlsx",
+  );
+});
+
+test("punctuation never reaches the file name", () => {
+  // Windows rejects half of it, and "Sone Products Ltd." would otherwise ship
+  // a full stop into the middle of a name.
+  assert.equal(
+    exportFileName("vendors", ["Sone Products Ltd."], "2026-08-30"),
+    "vendors-Sone-Products-Ltd-2026-08-30.xlsx",
+  );
+  assert.equal(
+    exportFileName("vendors", ["PROD-1 / PROD-2"], "2026-08-30"),
+    "vendors-PROD-1-PROD-2-2026-08-30.xlsx",
+  );
+  // A value that is nothing but punctuation contributes nothing rather than a
+  // run of hyphens.
+  assert.equal(exportFileName("vendors", ["***"], "2026-08-30"), "vendors-2026-08-30.xlsx");
+});
+
+test("two filters are named; three become \"filtered\"", () => {
+  assert.equal(
+    exportFileName("components", ["PROD-1", "OLCRELPROD100"], "2026-08-30"),
+    "components-PROD-1-OLCRELPROD100-2026-08-30.xlsx",
+  );
+  // A file name that needs scrolling is no more use than one that says nothing.
+  assert.equal(
+    exportFileName("components", ["PROD-1", "OLCRELPROD100", "KG"], "2026-08-30"),
+    "components-filtered-2026-08-30.xlsx",
+  );
+});
+
+test("a long value is cut short, and never cut to a trailing hyphen", () => {
+  const name = exportFileName(
+    "vendors",
+    ["Excel Packaging Machinery Limited"],
+    "2026-08-30",
+  );
+  // 28 characters of it: "Excel-Packaging-Machinery-Li".
+  assert.equal(name, "vendors-Excel-Packaging-Machinery-Li-2026-08-30.xlsx");
+  assert.ok(!name.includes("--"), "no doubled hyphen where the cut landed");
 });
