@@ -31,6 +31,11 @@
      Darkened from the dark-theme #d88180 to keep 12px bold text legible on a
      white card - same hue, same family. */
   --idle-ink: #a34d4c;
+  /* Complete: made, off the line, waiting on QA. Teal because it sits between
+     Running's green and QA booked's blue, which is exactly where it sits in
+     the process - and it must not be mistaken for either. */
+  --done: #0d7377;
+  --done-ink: #0b6165;
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
   /* Height of .site-header, which is sticky at top: 0. Anything else that
      sticks has to clear it or it pins underneath and vanishes. */
@@ -66,6 +71,8 @@
     --warn-ink: #fab219;
     --crit-ink: #e07171;
     --idle-ink: #d88180;
+    --done: #2ab7bd;
+    --done-ink: #48c6ce;
     --shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
     /* Deeper than the light navy - these sit on a near-black plane, where the
        lighter value would glow. */
@@ -165,7 +172,7 @@ h1 { font-size: 26px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02
 
 .tiles {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(165px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -196,6 +203,8 @@ h1 { font-size: 26px; line-height: 1.15; font-weight: 700; letter-spacing: -0.02
 .tile.t-warn .v { color: var(--warn-ink); }
 .tile.t-crit::before { background: var(--crit); }
 .tile.t-crit .v { color: var(--crit-ink); }
+.tile.t-done::before { background: var(--done); }
+.tile.t-done .v { color: var(--done-ink); }
 
 .tile .k {
   font-size: 11.5px;
@@ -306,6 +315,37 @@ code {
 
 table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14px; }
 
+/* The outer table only.
+
+   Auto layout measures every cell to decide the column widths, and it redoes
+   that whenever the table changes. With 703 rows of 13 cells - and a detail
+   row spanning all of them, which auto layout has to redistribute across every
+   column - opening one panel meant re-measuring about nine thousand cells,
+   then repositioning the sticky headers. Both directions, every click.
+
+   Fixed layout takes the widths from the colgroup and never measures. Opening a
+   row costs that row, not the table. The price is that the widths are now
+   declared per column in the table components rather than discovered.
+
+   `width: 100%` keeps the table inside its container, so there is no sideways
+   scroll: when the declared column widths add up to more than the window, they
+   compress in proportion and long values ellipsize. That is why the column
+   lists are kept short - a column you do not need costs width the ones you do
+   need would rather have. */
+.table-wrap > table {
+  table-layout: fixed;
+  width: 100%;
+}
+
+/* Fixed columns cannot grow to fit, so anything too long is clipped rather
+   than allowed to spill across its neighbour. */
+.table-wrap > table td,
+.table-wrap > table thead th { overflow: hidden; }
+.table-wrap > table td.nowrap { text-overflow: ellipsis; }
+/* The detail row is the exception - its panel sets its own width. */
+.table-wrap > table tr.det > td { overflow: visible; }
+
+
 thead th {
   position: sticky;
   background: var(--surface);
@@ -317,7 +357,56 @@ thead th {
 }
 thead tr:first-child th { top: 0; }
 thead tr:nth-child(2) th { top: 34px; padding: 4px 6px; background: var(--surface-2); }
-thead tr:nth-child(2) th input { width: 100%; font-size: 12.5px; padding: 4px 7px; }
+/* The filter row. A column with few enough distinct values gets a dropdown of
+   them; the rest keep a text box. Both are sized the same so the row reads as
+   one control repeated, not two kinds of thing. */
+thead tr:nth-child(2) th input,
+thead tr:nth-child(2) th select {
+  width: 100%;
+  font-size: 12.5px;
+  padding: 4px 7px;
+}
+
+thead tr:nth-child(2) th select {
+  font-family: inherit;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--rule-strong);
+  border-radius: 6px;
+  /* Fixed columns are narrow, and a long customer name would otherwise widen
+     the closed select past its cell. */
+  max-width: 100%;
+  text-overflow: ellipsis;
+}
+
+/* A filter that is doing something should look like it. */
+thead tr:nth-child(2) th select:not([value=""]) { border-color: var(--muted); }
+
+/* A date expression, as you type it. Green means it parsed and the filter is
+   live; red means it did not, so the box is not filtering anything - which is
+   the whole reason to colour it, since an unreadable expression is ignored
+   rather than emptying the table. Half-typed dates go red on the way past,
+   and that is honest: 3008 is not a date yet either.
+
+   Not scoped to the table's filter row: the schedule's date box is in a
+   toolbar and speaks the same language, so it gets the same feedback. */
+input.parsed {
+  border-color: var(--good);
+  color: var(--good-ink);
+}
+
+input.unparsed {
+  border-color: var(--crit);
+  color: var(--crit-ink);
+}
+
+/* The focus ring takes the page accent everywhere else, which on these boxes
+   would put a third colour around an input whose colour means something -
+   amber on Orders, green on Components, blue on Schedule, none of it about
+   the expression. Keep the ring, since it is the keyboard indicator, but let
+   it agree with the state. */
+input.parsed:focus-visible { outline-color: var(--good); }
+input.unparsed:focus-visible { outline-color: var(--crit); }
 
 th button.sort {
   width: 100%;
@@ -576,6 +665,7 @@ td.nowrap { white-space: nowrap; }
 }
 .fl-run { background: rgba(12, 163, 12, 0.14); color: var(--good-ink); border-color: rgba(12, 163, 12, 0.3); }
 .fl-pause { background: rgba(250, 178, 25, 0.16); color: var(--warn-ink); border-color: rgba(250, 178, 25, 0.4); }
+.fl-done { background: rgba(32, 178, 184, 0.14); color: var(--done-ink); border-color: rgba(32, 178, 184, 0.36); }
 .fl-qa { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
 .fl-none { color: var(--idle-ink); }
 
@@ -756,3 +846,37 @@ table.cmp td.nm { color: var(--ink-2); min-width: 220px; }
   .day-bar,
   .wc-head { transition: none; }
 }
+
+/* Fifty rows a page. The control is deliberately dull - previous, a jump, next
+   and the range - because it is furniture, not something to look at. */
+.pager {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 11px;
+}
+
+
+/* Pushed to the far end, so the buttons stay together on the left. */
+.pager .count { margin-left: auto; }
+
+/* Page buttons are the same width whether the number is 1 or 20, so the row
+   does not shuffle as you move through it. */
+.pager button {
+  min-width: 34px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* The current page inherits the filled accent from `button.on`. Its text has
+   to be --plane, not #fff: the accent is a dark colour in the light theme and
+   a light one in the dark theme, and --plane flips with it. White would have
+   been invisible on the pale orange of the dark theme - which is exactly what
+   happened when this rule set the text to the accent itself. */
+.pager button.on {
+  color: var(--plane);
+  font-weight: 600;
+}
+
+.pager-gap { color: var(--muted); padding: 0 2px; }

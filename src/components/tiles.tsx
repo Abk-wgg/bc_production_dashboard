@@ -1,7 +1,7 @@
 import { formatNumber } from "@/lib/format";
 
 /**
- * The four numbers someone wants before they look at anything else.
+ * The handful of numbers someone wants before they look at anything else.
  *
  * Taken from the Picking Control Board's tile row. A colour bar down the left
  * carries the judgement — grey means "a count", red means "somebody has to do
@@ -14,7 +14,7 @@ export type Tile = {
   /** Small text after the number, e.g. "of 982". */
   suffix?: string;
   note?: string;
-  tone?: "good" | "warn" | "crit";
+  tone?: "good" | "done" | "warn" | "crit";
 };
 
 export default function Tiles({ tiles }: { tiles: Tile[] }) {

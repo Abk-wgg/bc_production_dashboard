@@ -21,15 +21,24 @@ export const NOT_ON_THE_LINE: FloorState = { status: "not-started", operator: ""
 /**
  * Button press to state.
  *
- * `Complete` is a booking - output, consumption or scrap - so an order whose
- * last press is a Complete is still on the line, not finished with. BC moves an
- * order to Finished status when it is actually done, and that is a different
- * question this file does not answer.
+ * `Complete` is its own state, not Running. Most of the time it is the end of
+ * production: the batch is off the line and waiting on QA. On a large order the
+ * floor completes and QA-books several times over, so a Complete is not proof
+ * the order is done - but it is proof that nothing is being made right now,
+ * which is what Running is supposed to mean.
+ *
+ * It used to fold into Running, and the fold was hiding most of that tile: 33
+ * of the 41 orders reading Running had Complete as their last press, a median
+ * of four days earlier. Only 8 had actually been started or restarted.
+ *
+ * Finishing the order is BC's business, not this file's. Output posts at the
+ * QA Book, and BC finishes the order there once posted output passes 96% of
+ * the order quantity.
  */
 const BY_BUTTON: Record<string, FloorStatus> = {
   Start: "running",
   Restart: "running",
-  Complete: "running",
+  Complete: "complete",
   Pause: "paused",
   "QA Book": "qa-booked",
 };
@@ -45,9 +54,12 @@ export const FLOOR_STATES: {
   key: FloorStatus;
   label: string;
   /** Pill style, matching the picking control board's colours. */
-  tone: "run" | "pause" | "qa" | null;
+  tone: "run" | "done" | "pause" | "qa" | null;
 }[] = [
+  // In the order work moves through them, which is also the order the tiles
+  // are drawn in: started, made, stopped, booked, untouched.
   { key: "running", label: "Running", tone: "run" },
+  { key: "complete", label: "Complete", tone: "done" },
   { key: "paused", label: "Paused", tone: "pause" },
   { key: "qa-booked", label: "QA booked", tone: "qa" },
   { key: "not-started", label: "Not started", tone: null },
@@ -61,7 +73,7 @@ export function floorTone(status: FloorStatus): string {
   return FLOOR_STATES.find((s) => s.key === status)?.tone ?? "";
 }
 
-/** Running, paused or waiting on QA - anything but untouched. */
+/** Anything but untouched: started, complete, paused or waiting on QA. */
 export function isOnTheLine(status: FloorStatus): boolean {
   return status !== "not-started";
 }
@@ -106,6 +118,7 @@ export function countFloorStates(
 ): Record<FloorStatus, number> {
   const counts: Record<FloorStatus, number> = {
     running: 0,
+    complete: 0,
     paused: 0,
     "qa-booked": 0,
     "not-started": 0,

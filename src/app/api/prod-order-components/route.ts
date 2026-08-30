@@ -10,7 +10,7 @@ import { getStock } from "@/lib/bc/inventory";
 import { getOpenPurchaseLines } from "@/lib/bc/purchasing";
 import { buildWorkCenterMap } from "@/lib/work-center";
 import { buildIncomingMap, buildStockMap } from "@/lib/chain";
-import type { BoardComponent } from "@/lib/types";
+import type { FeedComponent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +28,7 @@ export async function GET(request: Request) {
   const incomingByItem = buildIncomingMap(purchases.rows);
   const onBoard = new Set(orders.rows.map((o) => o.no));
 
-  let rows: BoardComponent[] = components.rows
+  let rows: FeedComponent[] = components.rows
     .filter((component) => onBoard.has(component.prodOrderNo))
     .map((component) => {
       const held = stockByItem.get(component.itemNo);

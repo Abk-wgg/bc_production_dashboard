@@ -19,22 +19,22 @@ import { UNASSIGNED } from "@/lib/work-center";
  */
 function buildColumns(asOf: string, lineCount: (order: BoardOrder) => number): Column<BoardOrder>[] {
   return [
-    { key: "locationCode", label: "Location", cell: (r) => r.locationCode, nowrap: true },
+    { key: "locationCode", width: "115px",  label: "Location", cell: (r) => r.locationCode, nowrap: true },
     {
-      key: "workCenter",
+      key: "workCenter", width: "130px",
       label: "Work Center",
       cell: (r) => r.workCenter || UNASSIGNED,
       nowrap: true,
     },
     {
-      key: "startingDate",
+      key: "startingDate", width: "130px", filter: "date",
       label: "Planned start",
       cell: (r) => formatDate(r.startingDate),
       sortValue: (r) => r.startingDate ?? "",
       nowrap: true,
     },
     {
-      key: "endingDate",
+      key: "endingDate", width: "120px", filter: "date",
       label: "Planned end",
       cell: (r) => formatDate(r.endingDate),
       sortValue: (r) => r.endingDate ?? "",
@@ -49,14 +49,14 @@ function buildColumns(asOf: string, lineCount: (order: BoardOrder) => number): C
         ),
     },
     {
-      key: "floor",
+      key: "floor", width: "110px",
       label: "Floor",
       cell: (r) => (isOnTheLine(r.floor.status) ? floorLabel(r.floor.status) : ""),
       nowrap: true,
       render: (r) => <FloorPill order={r} />,
     },
     {
-      key: "no",
+      key: "no", width: "155px",
       label: "No.",
       cell: (r) => r.no,
       nowrap: true,
@@ -65,20 +65,19 @@ function buildColumns(asOf: string, lineCount: (order: BoardOrder) => number): C
       // one click further in, from inside the panel.
       render: (r) => <span className="code">{r.no}</span>,
     },
-    { key: "description", label: "Description", cell: (r) => r.description, wrap: true },
-    { key: "brand", label: "Brand", cell: (r) => r.brand, nowrap: true },
-    { key: "customerName", label: "Customer", cell: (r) => r.customerName, wrap: true },
-    { key: "salesOrderNo", label: "Sales Order", cell: (r) => r.salesOrderNo, nowrap: true },
-    { key: "status", label: "Status", cell: (r) => statusName(r.status), nowrap: true },
+    { key: "description", width: "240px",  label: "Description", cell: (r) => r.description, wrap: true },
+    { key: "brand", width: "115px",  label: "Brand", cell: (r) => r.brand, nowrap: true },
+    { key: "customerName", width: "150px",  label: "Customer", cell: (r) => r.customerName, wrap: true },
+    { key: "salesOrderNo", width: "125px",  label: "Sales Order", cell: (r) => r.salesOrderNo, nowrap: true },
     {
-      key: "quantity",
+      key: "quantity", width: "105px",
       label: "Quantity",
       cell: (r) => formatNumber(r.quantity),
       sortValue: (r) => r.quantity,
       numeric: true,
     },
     {
-      key: "made",
+      key: "made", width: "95px",
       label: "Made",
       // From the shop-floor event log, not `Finished Quantity` - that field reads
       // 0 on every row in this tenant.
@@ -87,43 +86,13 @@ function buildColumns(asOf: string, lineCount: (order: BoardOrder) => number): C
       numeric: true,
     },
     {
-      key: "progress",
+      key: "progress", width: "115px",
       label: "Progress",
       cell: (r) => (r.made ? `${Math.round(completionOf(r.made, r.quantity) * 100)}%` : ""),
       sortValue: (r) => completionOf(r.made, r.quantity),
       numeric: true,
       render: (r) => (r.made ? <ProgressCell made={r.made} planned={r.quantity} /> : null),
     },
-    {
-      key: "scrapped",
-      label: "Scrap",
-      cell: (r) => (r.scrapped ? formatNumber(r.scrapped) : ""),
-      sortValue: (r) => r.scrapped,
-      numeric: true,
-    },
-    {
-      key: "lines",
-      label: "Lines",
-      // Manually flushed lines with something left on them - what a picker
-      // would actually go and fetch. Zero means there is nothing to pick.
-      cell: (r) => String(lineCount(r)),
-      sortValue: (r) => lineCount(r),
-      numeric: true,
-    },
-    {
-      key: "scheduled",
-      label: "VAPS",
-      cell: (r) => (r.scheduled ? "Scheduled" : ""),
-      nowrap: true,
-    },
-    {
-      key: "dueDate",
-      label: "Due Date",
-      cell: (r) => formatDate(r.dueDate),
-      sortValue: (r) => r.dueDate ?? "",
-      nowrap: true,
-    },
-    { key: "assignedUserId", label: "Assigned", cell: (r) => r.assignedUserId, nowrap: true },
   ];
 }
 
@@ -188,6 +157,7 @@ export default function OrdersTable({
     <DataTable
       rows={rows}
       columns={columns}
+      asOf={asOf}
       rowKey={(row) => row.no}
       exportName="production-orders"
       emptyMessage="No production orders match the current view."

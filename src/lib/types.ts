@@ -175,7 +175,12 @@ export type OutputEvent = {
  * press. The rules live in src/lib/floor.ts; the shape is here because both the
  * server and the client components handle it.
  */
-export type FloorStatus = "running" | "paused" | "qa-booked" | "not-started";
+export type FloorStatus =
+  | "running"
+  | "complete"
+  | "paused"
+  | "qa-booked"
+  | "not-started";
 
 export type FloorState = {
   status: FloorStatus;
@@ -306,13 +311,56 @@ export type BoardOrder = OrderWithWorkCenter & {
   salesShipmentDate: string | null;
 };
 
-/** A component with stock and incoming supply attached. */
-export type BoardComponent = ComponentWithWorkCenter & {
+/**
+ * A component with stock and incoming supply attached, every field intact.
+ * This is the JSON feed's shape, not the browser's - see BoardComponent.
+ */
+export type FeedComponent = ComponentWithWorkCenter & {
   /** Stock free to use, summed across lots. */
   available: number;
   /** Earliest expiry across the lots holding it, if lot-tracked. */
   earliestExpiry: string | null;
   /** Outstanding on purchase orders, and when the first of it lands. */
   onOrder: number;
+  nextReceipt: string | null;
+};
+
+/**
+ * The part of a component line the browser ever reads.
+ *
+ * This list IS the page payload: a server component serialises every field it
+ * hands a client component into the HTML, once per line, and there are 1,957
+ * lines. Spreading the BC row here instead shipped 213 KB of fields nothing
+ * renders - `binCode`, `variantCode`, `emad`, `flushingMethod` (which does its
+ * work in scope.ts, on the server) and a component `quantity` that reads 0 on
+ * every row.
+ *
+ * Add a field only when something on screen uses it.
+ */
+export type ComponentLine = Pick<
+  ProdOrderComponent,
+  | "prodOrderNo"
+  | "prodOrderLineNo"
+  | "lineNo"
+  | "status"
+  | "itemNo"
+  | "description"
+  | "unitOfMeasureCode"
+  | "remainingQuantity"
+  | "expectedQuantity"
+  | "locationCode"
+  | "dueDate"
+  | "qtyPicked"
+  | "completelyPicked"
+>;
+
+/** A component line as a page hands it to a client component. */
+export type BoardComponent = ComponentLine & {
+  workCenter: string;
+  /** Stock free to use, summed across lots. */
+  available: number;
+  /** Earliest expiry across the lots holding it, if lot-tracked. */
+  earliestExpiry: string | null;
+  /** When the first of anything on order lands. */
   nextReceipt: string | null;
 };

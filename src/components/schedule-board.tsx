@@ -2,8 +2,13 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { BoardOrder, ProdOrderComponent } from "@/lib/types";
+import type { BoardOrder, ComponentLine } from "@/lib/types";
 import { completionOf, pickStateLabel, type PickState } from "@/lib/chain";
+import {
+  DATE_FILTER_HELP,
+  DATE_FILTER_PLACEHOLDER,
+  parseDateFilter,
+} from "@/lib/date-filter";
 import { floorLabel, floorTone } from "@/lib/floor";
 import { formatDate, formatDayHeading, formatNumber } from "@/lib/format";
 import {
@@ -22,6 +27,9 @@ const LOCATION_COLOURS = ["#c9ada7", "#7fa6c9", "#8fcf9b", "#e0c074", "#c19ad8",
 
 // Which pill style each pick state wears. "Can pick" is green because it is the
 // one that needs no attention; the other two are the ones to act on.
+/** What the "From today" button puts in the box. Everything from today on. */
+const FROM_TODAY = ">=cd";
+
 const PICK_TONE: Record<PickState, string> = {
   "can-pick": "ok",
   "some-missing": "part",
@@ -38,7 +46,7 @@ export default function ScheduleBoard({
 }: {
   orders: BoardOrder[];
   /** Components keyed by production order number. */
-  componentsByOrder: Record<string, ProdOrderComponent[]>;
+  componentsByOrder: Record<string, ComponentLine[]>;
   /** How many component lines are short, keyed by production order number. */
   shortagesByOrder: Record<string, number>;
   /** Pick state per order. Empty when the stock feed is incomplete. */
@@ -49,14 +57,27 @@ export default function ScheduleBoard({
   // means a work centre that appears in BC tomorrow shows up by default instead
   // of being silently absent because it was not in a list saved today.
   const [hidden, setHidden] = useState<string[]>([]);
-  // The "from" filter stays off. Defaulting it to today would hide the backlog
+  // The date filter stays off. Defaulting it to today would hide the backlog
   // completely, and a production schedule that silently omits every late order
   // is worse than useless - it looks reassuringly empty.
-  const [from, setFrom] = useState("");
+  //
+  // It was a native date picker, which could only ever express one thing: a
+  // lower bound. The tables already speak a date language, and the questions
+  // asked of a schedule are the ones it is for - this week, the next seven
+  // days, everything after the month end - so the box takes an expression.
+  const [dateExpr, setDateExpr] = useState("");
   // Which day you LAND on is a separate question from what is visible, and
   // nothing is hidden by it. Null means "not chosen yet", resolved below to
   // today; once the user pages, their choice sticks.
   const [dayIndex, setDayIndex] = useState<number | null>(null);
+
+  // Null while the box is empty or half-typed, and then nothing is filtered.
+  // An expression that does not read yet must not empty the board.
+  const dateMatch = useMemo(
+    () => (dateExpr.trim() === "" ? null : parseDateFilter(dateExpr, asOf)),
+    [dateExpr, asOf],
+  );
+  const dateState = dateExpr.trim() === "" ? undefined : dateMatch ? "parsed" : "unparsed";
 
   const colourForLocation = useMemo(() => {
     const locations = locationsIn(orders);
@@ -75,12 +96,13 @@ export default function ScheduleBoard({
   const beforeCentres = useMemo(
     () =>
       orders.filter((order) => {
-        // An order with no scheduled start cannot sit on a day, so a "from"
-        // filter necessarily excludes it.
-        if (from && (!order.scheduledStart || order.scheduledStart < from)) return false;
+        // An order with no scheduled start cannot sit on a day, so a date
+        // filter necessarily excludes it - which is what every matcher does
+        // with a blank date anyway.
+        if (dateMatch && !dateMatch(order.scheduledStart ?? "")) return false;
         return true;
       }),
-    [orders, from],
+    [orders, dateMatch],
   );
 
   const countByCentre = useMemo(() => {
@@ -231,25 +253,30 @@ export default function ScheduleBoard({
         </div>
 
         <label style={{ fontSize: 13.5, color: "var(--muted)" }}>
-          From{" "}
+          Dates{" "}
           <input
-            type="date"
-            value={from}
+            type="text"
+            className={dateState}
+            style={{ width: 160 }}
+            value={dateExpr}
+            placeholder={DATE_FILTER_PLACEHOLDER}
+            title={DATE_FILTER_HELP}
+            aria-label="Filter days"
             onChange={(e) => {
-              setFrom(e.target.value);
+              setDateExpr(e.target.value);
               setDayIndex(0);
             }}
           />
         </label>
         <button
           type="button"
-          className={from === asOf ? "on" : undefined}
+          className={dateExpr === FROM_TODAY ? "on" : undefined}
           onClick={() => {
-            setFrom(from === asOf ? "" : asOf);
+            setDateExpr(dateExpr === FROM_TODAY ? "" : FROM_TODAY);
             setDayIndex(0);
           }}
         >
-          {from === asOf ? "Showing from today" : "From today"}
+          {dateExpr === FROM_TODAY ? "Showing from today" : "From today"}
         </button>
       </div>
 
@@ -354,7 +381,7 @@ function OrderCard({
   asOf,
 }: {
   order: BoardOrder;
-  components: ProdOrderComponent[];
+  components: ComponentLine[];
   shortages: number;
   pickState?: PickState;
   colour?: string;

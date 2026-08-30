@@ -17,10 +17,15 @@ import { UNASSIGNED } from "@/lib/work-center";
  * behind the row rather than here. Sixteen columns of it, repeated once per
  * component, was a spreadsheet of the underlying table rather than a view of
  * the work.
+ *
+ * Kept deliberately short. Every column is 703 more cells the browser has to
+ * lay out and paint, and this table is read to answer one question - can this
+ * order run - not to hold everything that might be asked later. Line count,
+ * shortfall, next delivery and expiry are all still in the panel.
  */
 const COLUMNS: Column<OrderComponents>[] = [
   {
-    key: "prodOrderNo",
+    key: "prodOrderNo", width: "155px",
     label: "Prod. Order No.",
     cell: (r) => r.prodOrderNo,
     nowrap: true,
@@ -28,15 +33,15 @@ const COLUMNS: Column<OrderComponents>[] = [
     // colour. The caret is what says the row opens.
     render: (r) => <span className="code">{r.prodOrderNo}</span>,
   },
-  { key: "locationCode", label: "Location", cell: (r) => r.locationCode, nowrap: true },
+  { key: "locationCode", width: "115px",  label: "Location", cell: (r) => r.locationCode, nowrap: true },
   {
-    key: "workCenter",
+    key: "workCenter", width: "130px",
     label: "Work Center",
     cell: (r) => r.workCenter || UNASSIGNED,
     nowrap: true,
   },
   {
-    key: "neededDate",
+    key: "neededDate", width: "105px", filter: "date",
     // BC calls this the component's Due Date, but it is not a promise to
     // anyone: it is the parent order's planned start - the day the material has
     // to be at the line. Labelled for what it is.
@@ -46,28 +51,21 @@ const COLUMNS: Column<OrderComponents>[] = [
     nowrap: true,
   },
   {
-    key: "lineCount",
-    label: "Lines",
-    cell: (r) => String(r.lineCount),
-    sortValue: (r) => r.lineCount,
-    numeric: true,
-  },
-  {
-    key: "remaining",
+    key: "remaining", width: "115px",
     label: "Remaining",
     cell: (r) => formatNumber(r.remaining),
     sortValue: (r) => r.remaining,
     numeric: true,
   },
   {
-    key: "picked",
+    key: "picked", width: "95px",
     label: "Picked",
     cell: (r) => formatNumber(r.picked),
     sortValue: (r) => r.picked,
     numeric: true,
   },
   {
-    key: "fullyPicked",
+    key: "fullyPicked", width: "130px",
     label: "Fully Picked",
     cell: (r) => (r.fullyPicked ? "Yes" : `${r.pickedLines} of ${r.lineCount}`),
     // Sorted on the proportion, so a part-picked order sits between an
@@ -84,33 +82,12 @@ const COLUMNS: Column<OrderComponents>[] = [
       ),
   },
   {
-    key: "shortLines",
+    key: "shortLines", width: "90px",
     label: "Short",
     cell: (r) => (r.shortLines > 0 ? `${r.shortLines} line${r.shortLines === 1 ? "" : "s"}` : ""),
     sortValue: (r) => r.shortLines,
     nowrap: true,
     render: (r) => (r.shortLines > 0 ? <span className="pill late">{r.shortLines}</span> : null),
-  },
-  {
-    key: "shortBy",
-    label: "Short By",
-    cell: (r) => (r.shortBy > 0 ? formatNumber(r.shortBy) : ""),
-    sortValue: (r) => r.shortBy,
-    numeric: true,
-  },
-  {
-    key: "nextReceipt",
-    label: "Next Delivery",
-    cell: (r) => formatDate(r.nextReceipt),
-    sortValue: (r) => r.nextReceipt ?? "",
-    nowrap: true,
-  },
-  {
-    key: "earliestExpiry",
-    label: "Expires",
-    cell: (r) => formatDate(r.earliestExpiry),
-    sortValue: (r) => r.earliestExpiry ?? "",
-    nowrap: true,
   },
 ];
 
@@ -134,7 +111,7 @@ export default function ComponentsTable({
 
   const columns = useMemo(
     () =>
-      stockKnown ? COLUMNS : COLUMNS.filter((c) => c.key !== "shortLines" && c.key !== "shortBy"),
+      stockKnown ? COLUMNS : COLUMNS.filter((c) => c.key !== "shortLines"),
     [stockKnown],
   );
 

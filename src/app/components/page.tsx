@@ -7,7 +7,7 @@ import { getProdOrderRoutingLines } from "@/lib/bc/routing";
 import { buildWorkCenterMap } from "@/lib/work-center";
 import { getStock } from "@/lib/bc/inventory";
 import { getOpenPurchaseLines } from "@/lib/bc/purchasing";
-import { buildIncomingMap, buildStockMap } from "@/lib/chain";
+import { buildIncomingMap, buildStockMap, toBoardComponent } from "@/lib/chain";
 import type { BoardComponent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -42,20 +42,18 @@ export default async function ComponentsPage({
   const stockByItem = buildStockMap(stock.rows);
   const incomingByItem = buildIncomingMap(purchases.rows);
 
+  // toBoardComponent, not a spread: what is listed there is what gets
+  // serialised into the HTML, once for each of these rows.
   const rows: BoardComponent[] = components.rows
     .filter((component) => onBoard.has(component.prodOrderNo))
-    .map((component) => {
-      const held = stockByItem.get(component.itemNo);
-      const coming = incomingByItem.get(component.itemNo);
-      return {
-        ...component,
-        workCenter: workCenters.get(component.prodOrderNo) ?? "",
-        available: held?.available ?? 0,
-        earliestExpiry: held?.earliestExpiry ?? null,
-        onOrder: coming?.outstanding ?? 0,
-        nextReceipt: coming?.nextReceipt ?? null,
-      };
-    });
+    .map((component) =>
+      toBoardComponent(
+        component,
+        workCenters.get(component.prodOrderNo) ?? "",
+        stockByItem,
+        incomingByItem,
+      ),
+    );
 
   return (
     <main className="page-components">

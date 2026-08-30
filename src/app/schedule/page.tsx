@@ -15,6 +15,7 @@ import {
   buildSalesOrderMap,
   buildStockMap,
   shortagesFor,
+  toComponentLine,
   type PickState,
 } from "@/lib/chain";
 import { buildFloorMap, countFloorStates, isOnTheLine, NOT_ON_THE_LINE } from "@/lib/floor";
@@ -22,7 +23,7 @@ import Tiles from "@/components/tiles";
 import type { BoardOrder } from "@/lib/types";
 import { withWorkCenters } from "@/lib/work-center";
 import { today } from "@/lib/board";
-import type { ProdOrderComponent } from "@/lib/types";
+import type { ComponentLine, ProdOrderComponent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -62,6 +63,15 @@ export default async function SchedulePage() {
     const key = component.prodOrderNo;
     if (!key) continue;
     (componentsByOrder[key] ??= []).push(component);
+  }
+
+  // Narrowed again before it crosses to the browser. The card lists five
+  // fields per component; the rest of the BC row would be serialised into the
+  // HTML 1,957 times over for nothing. The full rows stay here, because the
+  // shortage and pick-state maths below still wants them.
+  const componentLinesByOrder: Record<string, ComponentLine[]> = {};
+  for (const [orderNo, lines] of Object.entries(componentsByOrder)) {
+    componentLinesByOrder[orderNo] = lines.map(toComponentLine);
   }
 
   // Which orders cannot be made right now, and how many lines are short.
@@ -125,6 +135,12 @@ export default async function SchedulePage() {
                 note: "Last press was Start, Restart or a booking",
               },
               {
+                label: "Complete",
+                value: floorCounts.complete,
+                tone: "done",
+                note: "Made and off the line, waiting on a QA booking",
+              },
+              {
                 label: "Paused",
                 value: floorCounts.paused,
                 tone: "warn",
@@ -153,7 +169,7 @@ export default async function SchedulePage() {
           )}
           <ScheduleBoard
             orders={rows}
-            componentsByOrder={componentsByOrder}
+            componentsByOrder={componentLinesByOrder}
             shortagesByOrder={shortagesByOrder}
             pickStateByOrder={pickStateByOrder}
             asOf={today()}

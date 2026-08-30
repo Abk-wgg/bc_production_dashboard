@@ -53,6 +53,22 @@ The constraints are the design. Check any change against all of them at once.
 - `src/components/` — client components. `data-table.tsx` is the shared sortable
   and filterable table with Excel export; pass it `expand` and every row opens a
   detail panel underneath.
+  - **Every column needs a `width`.** The outer table is `table-layout: fixed`,
+    so the colgroup decides the columns and the browser never measures a cell.
+    A column without one splits whatever is left, which is only predictable if
+    at most one column does it.
+  - That is a performance rule, not a style one. Under auto layout, opening a
+    panel was slow enough to complain about: the detail row spans every column,
+    and auto layout answers that by re-measuring the whole table — 703 rows of
+    13 cells — then repositioning the sticky headers, on open and again on
+    close. Fixed layout makes opening a row cost that row.
+  - React memoisation was tried first and was not the problem. The rows are
+    memoised anyway and it is worth keeping, but the cost was browser layout,
+    which no amount of it touches. The diagnostic that settled it: filter the
+    table down to a handful of rows and see whether opening is instant.
+  - `expand` and `columns` must keep stable identities or the memo is dead. An
+    inline arrow for `expand` undoes it silently — there is no symptom except
+    the slowness returning.
 - `src/app/api/*` — the same data as JSON, for Excel and Power BI.
 - `src/auth.ts` + `src/middleware.ts` — who may look at the board. Entirely
   separate from how the app reads BC; see the note at the top of `auth.ts`.
@@ -229,11 +245,31 @@ remove real work from the board.
 - **Floor status comes from the button presses, not a field.** BC has no "is
   this running" flag. Table 50403 (`Prod_Order_Data_Entry_Excel`) logs every
   press — Start, Pause, Restart, Complete, QA Book — and the order's state is
-  the LAST one, ties broken on entry number. `Complete` is a booking, not the
-  end of the order, so it still reads as Running. The rules are in
+  the LAST one, ties broken on entry number. The rules are in
   `src/lib/floor.ts` and match the shop floor's own picking control board on
   979 of 982 orders; the three that differ have a blank timestamp in that
   board's export.
+- **How the floor actually uses the buttons** (from Abhishek, 2026-08-30 —
+  none of this is derivable from the data):
+  - **Output posts at the QA Book, not at the Complete.** That is why
+    `Posted Output Quantity` on the 5409 routing line moves when it does.
+  - **BC finishes the order at a QA Book once posted output passes 96% of the
+    order quantity**, after posting that output. So an order still Released
+    with QA Book as its last press either did not clear 96% or has more to run.
+  - A Complete is usually the end of production. On a large order the floor
+    completes and QA-books several times over, so the same order reads
+    Complete, then QA booked, then Running again across its life.
+- **`Complete` is its own state, not Running.** Five states, not four:
+  Running, Complete, Paused, QA booked, Not started.
+  - Folding Complete into Running was hiding most of that tile. Of the 41
+    orders reading Running, **33 had Complete as their last press** and only 8
+    had been started or restarted. The Completes were a median of **four days**
+    old (max 13, only 3 within a day); the Starts, two.
+  - 32 of those 33 have never been QA booked at all — that is the queue the
+    state exists to show.
+  - Teal, between Running's green and QA booked's blue, because that is where
+    it sits in the process. `isOnTheLine` still counts it as touched, so the
+    pick flag stays off it.
 - **A started order has no picking problem, so the pick flag comes off it.**
   The floor cannot press Start until the components are picked, and picking
   moves that stock out of inventory — so the availability maths reads "no

@@ -14,6 +14,7 @@ import {
   buildProgressMap,
   buildSalesOrderMap,
   buildStockMap,
+  toBoardComponent,
 } from "@/lib/chain";
 import { buildFloorMap, countFloorStates, NOT_ON_THE_LINE } from "@/lib/floor";
 import type { BoardComponent, BoardOrder } from "@/lib/types";
@@ -67,16 +68,14 @@ export default async function OrdersPage() {
   const componentsByOrder: Record<string, BoardComponent[]> = {};
   for (const component of components.rows) {
     if (!onBoard.has(component.prodOrderNo)) continue;
-    const held = stockByItem.get(component.itemNo);
-    const coming = incomingByItem.get(component.itemNo);
-    (componentsByOrder[component.prodOrderNo] ??= []).push({
-      ...component,
-      workCenter: workCenters.get(component.prodOrderNo) ?? "",
-      available: held?.available ?? 0,
-      earliestExpiry: held?.earliestExpiry ?? null,
-      onOrder: coming?.outstanding ?? 0,
-      nextReceipt: coming?.nextReceipt ?? null,
-    });
+    (componentsByOrder[component.prodOrderNo] ??= []).push(
+      toBoardComponent(
+        component,
+        workCenters.get(component.prodOrderNo) ?? "",
+        stockByItem,
+        incomingByItem,
+      ),
+    );
   }
 
   const summary = summarise(orders.rows, asOf);

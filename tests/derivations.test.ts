@@ -43,6 +43,8 @@ import { toStatus, statusName, RELEASED, FINISHED } from "../src/lib/status.ts";
 import { formatDate, formatLineNo } from "../src/lib/format.ts";
 import { safeCallbackUrl } from "../src/lib/safe-redirect.ts";
 import { groupByOrder, isShort, shortfallOf } from "../src/lib/component-groups.ts";
+import { pageWindow, GAP } from "../src/lib/paging.ts";
+import { parseDateFilter } from "../src/lib/date-filter.ts";
 import {
   isBoardLocation,
   isBoardStatus,
@@ -671,9 +673,12 @@ test("pick states are counted across every order", () => {
 test("a button press maps to what the line is doing", () => {
   assert.equal(floorStatusOf("Start"), "running");
   assert.equal(floorStatusOf("Restart"), "running");
-  // A Complete is a booking - output, consumption or scrap - not the end of the
-  // order. BC's Finished status answers that, and it is a different question.
-  assert.equal(floorStatusOf("Complete"), "running");
+  // Complete is its own state. Usually it is the end of production and the
+  // batch is waiting on QA; on a large order the floor completes and QA-books
+  // several times over. Either way nothing is being made, which is what
+  // Running is for. Whether the ORDER is done is BC's Finished status, a
+  // different question this file does not answer.
+  assert.equal(floorStatusOf("Complete"), "complete");
   assert.equal(floorStatusOf("Pause"), "paused");
   assert.equal(floorStatusOf("QA Book"), "qa-booked");
   // Something happened, so it cannot be "not started".
@@ -714,6 +719,29 @@ test("an order with no events is not on the line", () => {
   assert.equal(floor.has("B"), false);
   assert.equal(isOnTheLine("not-started"), false);
   assert.equal(isOnTheLine("qa-booked"), true);
+  // Complete counts as touched: it was picked, started and made. Only an
+  // order nobody has pressed anything on is off the line.
+  assert.equal(isOnTheLine("complete"), true);
+});
+
+test("a large order cycles through Complete and QA Book more than once", () => {
+  // Output posts at the QA Book, not the Complete, and BC finishes the order
+  // there once posted output passes 96% of the order quantity. So a Complete
+  // is the end of a batch, not necessarily the end of the order - the same
+  // order reads Complete, then QA booked, then Running again over its life.
+  const madeABatch = buildFloorMap([
+    event({ prodOrderNo: "A", entryNo: 1, buttonEvent: "Start", at: "2026-08-20T06:00:00Z" }),
+    event({ prodOrderNo: "A", entryNo: 2, buttonEvent: "Complete", at: "2026-08-21T14:00:00Z" }),
+  ]);
+  assert.equal(madeABatch.get("A")?.status, "complete");
+
+  const backOnTheLine = buildFloorMap([
+    event({ prodOrderNo: "A", entryNo: 1, buttonEvent: "Start", at: "2026-08-20T06:00:00Z" }),
+    event({ prodOrderNo: "A", entryNo: 2, buttonEvent: "Complete", at: "2026-08-21T14:00:00Z" }),
+    event({ prodOrderNo: "A", entryNo: 3, buttonEvent: "QA Book", at: "2026-08-22T09:00:00Z" }),
+    event({ prodOrderNo: "A", entryNo: 4, buttonEvent: "Restart", at: "2026-08-23T06:00:00Z" }),
+  ]);
+  assert.equal(backOnTheLine.get("A")?.status, "running");
 });
 
 test("floor counts are taken over the orders on the board", () => {
@@ -726,7 +754,7 @@ test("floor counts are taken over the orders on the board", () => {
   ]);
 
   const counts = countFloorStates(["A", "B", "C"], floor);
-  assert.deepEqual(counts, { running: 1, paused: 1, "qa-booked": 0, "not-started": 1 });
+  assert.deepEqual(counts, { running: 1, complete: 0, paused: 1, "qa-booked": 0, "not-started": 1 });
 });
 
 // --- which day the board opens on -------------------------------------------
@@ -905,4 +933,212 @@ test("a line is short only when something is left to consume", () => {
   // Nothing left to pick is not a shortage, however little stock there is.
   assert.equal(isShort(comp({ remainingQuantity: 0, available: 0 })), false);
   assert.equal(shortfallOf(comp({ remainingQuantity: 0, available: 0 })), 0);
+});
+
+// --- pager ------------------------------------------------------------------
+
+test("a short list shows every page and no ellipsis", () => {
+  assert.deepEqual(pageWindow(0, 1), [0]);
+  assert.deepEqual(pageWindow(1, 3), [0, 1, 2]);
+  assert.deepEqual(pageWindow(2, 5), [0, 1, 2, 3, 4]);
+});
+
+test("a long list keeps the first, the last and the neighbours", () => {
+  assert.deepEqual(pageWindow(9, 20), [0, GAP, 8, 9, 10, GAP, 19]);
+  assert.deepEqual(pageWindow(0, 20), [0, 1, GAP, 19]);
+  assert.deepEqual(pageWindow(19, 20), [0, GAP, 18, 19]);
+});
+
+test("a gap of one page shows the page rather than an ellipsis", () => {
+  // The ellipsis would take the same room as the number it hides.
+  assert.deepEqual(pageWindow(0, 4), [0, 1, 2, 3]);
+  assert.deepEqual(pageWindow(3, 5), [0, 1, 2, 3, 4]);
+});
+
+test("the window keeps a steady width through the middle", () => {
+  // Otherwise the buttons shuffle sideways under the pointer between clicks.
+  const widths = [5, 6, 7, 8, 9, 10].map((p) => pageWindow(p, 20).length);
+  assert.deepEqual(widths, [7, 7, 7, 7, 7, 7]);
+});
+
+test("no pages means no buttons", () => {
+  assert.deepEqual(pageWindow(0, 0), []);
+});
+
+// --- date filters -----------------------------------------------------------
+
+// A Sunday, deliberately: the week runs Monday to Sunday, so the last day of
+// the week is the fiddly one to get right.
+const ASOF = "2026-08-30";
+
+/** Does this expression match this date, read as of ASOF? */
+function hits(expression: string, date: string): boolean {
+  const match = parseDateFilter(expression, ASOF);
+  assert.ok(match, `expected ${expression} to parse`);
+  return match(date);
+}
+
+test("a date typed as ddmmyy is that date", () => {
+  assert.equal(hits("300826", "2026-08-30"), true);
+  assert.equal(hits("300826", "2026-08-29"), false);
+  // Four-digit years and separators both work.
+  assert.equal(hits("30082026", "2026-08-30"), true);
+  assert.equal(hits("30/08/26", "2026-08-30"), true);
+  assert.equal(hits("30-08-26", "2026-08-30"), true);
+});
+
+test("an impossible date does not parse", () => {
+  // JS would roll 31 February into March on its own. Silently filtering on
+  // the wrong date is worse than not filtering.
+  assert.equal(parseDateFilter("310226", ASOF), null);
+  assert.equal(parseDateFilter("321326", ASOF), null);
+  // Half-typed, which is what an input holds most of the time.
+  assert.equal(parseDateFilter("3008", ASOF), null);
+  assert.equal(parseDateFilter("", ASOF), null);
+  assert.equal(parseDateFilter("nonsense", ASOF), null);
+});
+
+test("c is current and l is last, over day, week, month and year", () => {
+  assert.equal(hits("cd", "2026-08-30"), true);
+  assert.equal(hits("cd", "2026-08-29"), false);
+  assert.equal(hits("ld", "2026-08-29"), true);
+
+  // ASOF is a Sunday, so the current week began on Monday the 24th.
+  assert.equal(hits("cw", "2026-08-24"), true);
+  assert.equal(hits("cw", "2026-08-30"), true);
+  assert.equal(hits("cw", "2026-08-23"), false);
+  assert.equal(hits("lw", "2026-08-17"), true);
+  assert.equal(hits("lw", "2026-08-23"), true);
+  assert.equal(hits("lw", "2026-08-24"), false);
+
+  assert.equal(hits("cm", "2026-08-01"), true);
+  assert.equal(hits("cm", "2026-08-31"), true);
+  assert.equal(hits("cm", "2026-09-01"), false);
+  assert.equal(hits("lm", "2026-07-31"), true);
+  assert.equal(hits("lm", "2026-08-01"), false);
+
+  assert.equal(hits("cy", "2026-01-01"), true);
+  assert.equal(hits("cy", "2026-12-31"), true);
+  assert.equal(hits("ly", "2025-12-31"), true);
+});
+
+test("the modifier and the unit work in either order, in any case", () => {
+  assert.equal(hits("mc", "2026-08-15"), true);
+  assert.equal(hits("CM", "2026-08-15"), true);
+  assert.equal(hits(" c m ", "2026-08-15"), true);
+  // A bare unit is the current one.
+  assert.equal(hits("m", "2026-08-15"), true);
+  assert.equal(hits("w", "2026-08-24"), true);
+});
+
+test("comparison operators read a period as a span, not a point", () => {
+  assert.equal(hits(">300826", "2026-08-31"), true);
+  assert.equal(hits(">300826", "2026-08-30"), false);
+  assert.equal(hits(">=300826", "2026-08-30"), true);
+  assert.equal(hits("<300826", "2026-08-29"), true);
+  assert.equal(hits("<=300826", "2026-08-30"), true);
+
+  // This is why a term is always a range: > a month means after it ends,
+  // < a month means before it began.
+  assert.equal(hits(">cm", "2026-09-01"), true);
+  assert.equal(hits(">cm", "2026-08-31"), false);
+  assert.equal(hits("<cm", "2026-07-31"), true);
+  assert.equal(hits("<cm", "2026-08-01"), false);
+  assert.equal(hits(">=cm", "2026-08-01"), true);
+});
+
+test("<> excludes the span", () => {
+  assert.equal(hits("<>cm", "2026-07-31"), true);
+  assert.equal(hits("<>cm", "2026-09-01"), true);
+  assert.equal(hits("<>cm", "2026-08-15"), false);
+});
+
+test(".. is an inclusive range, either way round", () => {
+  assert.equal(hits("200826..300826", "2026-08-20"), true);
+  assert.equal(hits("200826..300826", "2026-08-30"), true);
+  assert.equal(hits("200826..300826", "2026-08-19"), false);
+  assert.equal(hits("200826..300826", "2026-08-31"), false);
+  // Typed backwards, which people do.
+  assert.equal(hits("300826..200826", "2026-08-25"), true);
+  // Keywords work as endpoints too.
+  assert.equal(hits("lm..cm", "2026-07-01"), true);
+  assert.equal(hits("lm..cm", "2026-08-31"), true);
+  assert.equal(hits("lm..cm", "2026-09-01"), false);
+});
+
+test("& is and, | is or, and & binds tighter", () => {
+  assert.equal(hits("cw|lw", "2026-08-24"), true);
+  assert.equal(hits("cw|lw", "2026-08-17"), true);
+  assert.equal(hits("cw|lw", "2026-08-10"), false);
+
+  assert.equal(hits(">=010826&<=150826", "2026-08-10"), true);
+  assert.equal(hits(">=010826&<=150826", "2026-08-16"), false);
+
+  // a & b | c is (a & b) or c, so the 1st matches on the second branch only.
+  assert.equal(hits(">=100826&<=150826|010826", "2026-08-01"), true);
+  assert.equal(hits(">=100826&<=150826|010826", "2026-08-12"), true);
+  assert.equal(hits(">=100826&<=150826|010826", "2026-08-20"), false);
+});
+
+test("one bad term poisons the whole expression", () => {
+  // Half of a filter applied silently is worse than none of it.
+  assert.equal(parseDateFilter("cw|garbage", ASOF), null);
+  assert.equal(parseDateFilter(">=010826&", ASOF), null);
+});
+
+test("+ and - step the term in its own unit", () => {
+  // ASOF is Sunday 30 August 2026.
+  assert.equal(hits("cd+2", "2026-09-01"), true);
+  assert.equal(hits("cd+2", "2026-08-31"), false);
+  assert.equal(hits("cd-2", "2026-08-28"), true);
+
+  // A week steps by weeks, a month by months, a year by years - not by days.
+  assert.equal(hits("cw+1", "2026-08-31"), true);
+  assert.equal(hits("cw+1", "2026-09-06"), true);
+  assert.equal(hits("cw+1", "2026-09-07"), false);
+  assert.equal(hits("cm+1", "2026-09-30"), true);
+  assert.equal(hits("cm+1", "2026-10-01"), false);
+  assert.equal(hits("cm-1", "2026-07-15"), true);
+  assert.equal(hits("cy+1", "2027-06-01"), true);
+
+  // cm-1 and lm are the same thing said two ways.
+  assert.equal(hits("cm-1", "2026-07-01"), hits("lm", "2026-07-01"));
+});
+
+test("a typed date steps in days, and a bare step counts from today", () => {
+  assert.equal(hits("300826+7", "2026-09-06"), true);
+  assert.equal(hits("300826+7", "2026-09-05"), false);
+  assert.equal(hits("010926-1", "2026-08-31"), true);
+  // Month ends are why this steps by days rather than pretending otherwise.
+  assert.equal(hits("310826+1", "2026-09-01"), true);
+
+  assert.equal(hits("+2", "2026-09-01"), true);
+  assert.equal(hits("-1", "2026-08-29"), true);
+});
+
+test("steps combine with operators and ranges", () => {
+  // The next seven days, which is the question that wanted this.
+  assert.equal(hits("cd..cd+7", "2026-08-30"), true);
+  assert.equal(hits("cd..cd+7", "2026-09-06"), true);
+  assert.equal(hits("cd..cd+7", "2026-09-07"), false);
+  assert.equal(hits("cd..cd+7", "2026-08-29"), false);
+
+  assert.equal(hits(">=cd+2", "2026-09-01"), true);
+  assert.equal(hits(">=cd+2", "2026-08-31"), false);
+  assert.equal(hits("<cd-2", "2026-08-27"), true);
+  assert.equal(hits("cd+1|cd+3", "2026-09-02"), true);
+  assert.equal(hits("cd+1|cd+3", "2026-09-01"), false);
+});
+
+test("a step with nothing to step does not parse", () => {
+  assert.equal(parseDateFilter("cd+", ASOF), null);
+  assert.equal(parseDateFilter("zz+2", ASOF), null);
+  assert.equal(parseDateFilter("310226+1", ASOF), null);
+});
+
+test("a row with no date never matches", () => {
+  // Unknown is not a match, whatever is being asked.
+  assert.equal(hits("cm", ""), false);
+  assert.equal(hits("<>cm", ""), false);
+  assert.equal(hits(">010101", ""), false);
 });

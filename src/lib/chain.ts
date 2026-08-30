@@ -8,6 +8,8 @@
 // here is testable without credentials.
 
 import type {
+  BoardComponent,
+  ComponentLine,
   OutputEvent,
   ProdOrderComponent,
   PurchaseLine,
@@ -168,8 +170,52 @@ export type Shortage = {
  * only counts for the rest. An item with no stock row at all is treated as zero
  * available rather than skipped - absence of a row is absence of stock.
  */
+/**
+ * A BC component row, narrowed to what a client component can use.
+ *
+ * Every page that hands components to the browser goes through here. Spreading
+ * the row instead is how 213 KB of unread fields ended up serialised into the
+ * HTML of three pages - and a spread will not warn you, because excess property
+ * checks do not apply to it.
+ */
+export function toComponentLine(component: ProdOrderComponent): ComponentLine {
+  return {
+    prodOrderNo: component.prodOrderNo,
+    prodOrderLineNo: component.prodOrderLineNo,
+    lineNo: component.lineNo,
+    status: component.status,
+    itemNo: component.itemNo,
+    description: component.description,
+    unitOfMeasureCode: component.unitOfMeasureCode,
+    remainingQuantity: component.remainingQuantity,
+    expectedQuantity: component.expectedQuantity,
+    locationCode: component.locationCode,
+    dueDate: component.dueDate,
+    qtyPicked: component.qtyPicked,
+    completelyPicked: component.completelyPicked,
+  };
+}
+
+/** The same, plus the work centre and the stock join the tables show. */
+export function toBoardComponent(
+  component: ProdOrderComponent,
+  workCenter: string,
+  stock: Map<string, ItemStock>,
+  incoming: Map<string, ItemIncoming>,
+): BoardComponent {
+  const held = stock.get(component.itemNo);
+  const coming = incoming.get(component.itemNo);
+  return {
+    ...toComponentLine(component),
+    workCenter,
+    available: held?.available ?? 0,
+    earliestExpiry: held?.earliestExpiry ?? null,
+    nextReceipt: coming?.nextReceipt ?? null,
+  };
+}
+
 export function shortagesFor(
-  components: ProdOrderComponent[],
+  components: ComponentLine[],
   stock: Map<string, ItemStock>,
   incoming: Map<string, ItemIncoming>,
 ): Shortage[] {
@@ -247,7 +293,7 @@ export function pickStateLabel(state: PickState): string {
  * and calling it ready would put it in front of someone for no reason.
  */
 export function pickStateFor(
-  components: ProdOrderComponent[],
+  components: ComponentLine[],
   stock: Map<string, ItemStock>,
 ): PickState {
   const outstanding = components.filter((c) => c.remainingQuantity > 0);
@@ -268,7 +314,7 @@ export function pickStateFor(
 
 /** Every order's pick state, keyed by production order number. */
 export function buildPickStateMap(
-  componentsByOrder: Map<string, ProdOrderComponent[]> | Record<string, ProdOrderComponent[]>,
+  componentsByOrder: Map<string, ComponentLine[]> | Record<string, ComponentLine[]>,
   stock: Map<string, ItemStock>,
 ): Map<string, PickState> {
   const entries =
