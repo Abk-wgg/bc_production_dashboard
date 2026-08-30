@@ -26,6 +26,33 @@ The constraints are the design. Check any change against all of them at once.
 
 - Next.js 15 (App Router) + React 19 + TypeScript strict. No CSS framework —
   one hand-written `globals.css`.
+- **Each page owns one hue, declared once and read everywhere** — orders rust,
+  components green, schedule blue, vendors purple. The semantic colours already
+  hold green, amber, red and teal, so a fifth page must not reuse one or its
+  tint starts reading as a status.
+  - Four cues, one colour: the **accent** inside the page, the **plane** behind
+    it, the **header bar** and the current **tab** in the nav, and the page's
+    own **favicon and title** in the browser's tab strip.
+  - `--plane`, `--page-accent` and `--page-soft` are set on `<body>` through
+    `:has(.page-*)`, and those three declarations are the entire per-page
+    treatment — nothing downstream knows which page it is on. `<body>` rather
+    than the page itself because the background that covers the window is the
+    body's, the page class is on `<main>`, and a custom property cannot travel
+    up the tree. Without `:has()` everything falls back to neutral and the
+    favicon still carries.
+  - So adding a page means adding a `--<page>-accent/-soft/-plane` triple to
+    `:root` plus one `body:has()` block — never a bare `--accent` on the page
+    class. The header is outside `<main>` and can only see global tokens.
+  - **The header's accent band is 1px of border plus a 2px inset shadow, not a
+    3px border.** `--header-h` is a fixed 54px that every sticky bar offsets
+    against; a thicker border makes the header taller and leaves them all 2px
+    adrift, showing content scrolling behind. An inset shadow costs no height.
+  - **The browser's tab strip is not ours to paint.** Four `icon.svg` files,
+    one per route segment, same glyph in the page's hue — at 16px colour is the
+    only difference a tab can carry, and an identical glyph is what still reads
+    as one app. Titles are `"%s · Production board"` with the page's own name
+    first, because four open tabs truncate from the right. `viewport.themeColor`
+    is set per page but only shows in an installed app window.
 - Auth.js v5 (`next-auth@beta`) with the Microsoft Entra ID provider, JWT
   sessions, no database.
 - `output: "standalone"` — deploy by copying `.next/standalone`, `.next/static`
@@ -427,6 +454,17 @@ its own working directory, so `.env.local` has to be copied into
 `.next/standalone` alongside `.next/static` and `public/`. Without it the app
 silently falls back to the bundled snapshot — which looks like working software
 serving 543 component lines instead of 1,957.
+
+**Stop the standalone server before building.** It runs out of
+`.next/standalone`, which `next build` rewrites, and Windows will not let a
+build replace a file the running server holds open. The build does not fail --
+it compiles fine, prints nothing further and hangs at the end indefinitely,
+which reads like a slow build rather than a blocked one. Killing the wrapper is
+not enough either: stopping an `npm run build` kills npm, leaving the `next
+build` child alive and still holding `.next`, so the next attempt hangs too and
+two builds are now writing the same folder. Check nothing is left (`Get-Process
+node`) before starting another. With the port free, a build here takes about
+30 seconds.
 
 **`dev` and `build` share `.next`.** Running one while the other is up leaves
 development and production artifacts mixed in that folder, and the symptom is

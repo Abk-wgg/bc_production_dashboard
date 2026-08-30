@@ -26,6 +26,17 @@ import { withWorkCenters } from "@/lib/work-center";
 import { today } from "@/lib/board";
 import type { ComponentLine, ProdOrderComponent } from "@/lib/types";
 
+export const metadata = { title: "Schedule" };
+
+// Only visible in an installed app window - an ordinary browser tab strip is
+// the browser's to paint, not ours. Matches the header, which it sits above.
+export const viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#e8effa" },
+    { media: "(prefers-color-scheme: dark)", color: "#16283f" },
+  ],
+};
+
 export const dynamic = "force-dynamic";
 
 export default async function SchedulePage() {

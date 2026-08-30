@@ -11,6 +11,17 @@ import { getItems, buildItemDescriptionMap } from "@/lib/bc/items";
 import { buildIncomingMap, buildStockMap, toBoardComponent } from "@/lib/chain";
 import type { BoardComponent } from "@/lib/types";
 
+export const metadata = { title: "Components" };
+
+// Only visible in an installed app window - an ordinary browser tab strip is
+// the browser's to paint, not ours. Matches the header, which it sits above.
+export const viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#e6f2eb" },
+    { media: "(prefers-color-scheme: dark)", color: "#10291c" },
+  ],
+};
+
 export const dynamic = "force-dynamic";
 
 export default async function ComponentsPage({

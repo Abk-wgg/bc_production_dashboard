@@ -25,7 +25,11 @@ const mono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Production board",
+  // The page's own name comes first, because a tab strip with four of these
+  // open truncates from the right - "Production board" on all four is four
+  // identical tabs. `default` covers /signin and anything with no title of
+  // its own.
+  title: { default: "Production board", template: "%s · Production board" },
   description: "Read-only view of Business Central production orders",
 };
 

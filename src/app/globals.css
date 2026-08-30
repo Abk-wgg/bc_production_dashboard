@@ -88,27 +88,106 @@
   }
 }
 
-/* Per-page accent. Kept subtle now the palette carries the weight. */
-.page-orders { --accent: #a2542a; --accent-soft: #f6ece4; }
-.page-components { --accent: #1f6b46; --accent-soft: #e6f2eb; }
-/* Purple: the one hue not already spoken for. Orders are rust, components
-   green, schedule blue - and the semantic colours (good/warn/crit/done) hold
-   green, amber, red and teal, so an accent must not borrow any of those or a
-   page tint starts reading as a status. */
-.page-vendors { --accent: #6b3fa0; --accent-soft: #efe8f8; }
+/* --- per-page palette ------------------------------------------------------
+   Each page owns one hue, written down once here and read in three places:
+   the accent inside the page, the plane behind it, and its own tab in the
+   nav. Three cues, one colour - so "which page am I on" is answerable from
+   the edge of vision without reading the heading.
+
+   Purple for vendors is the one hue not already spoken for. Orders are rust,
+   components green, schedule blue - and the semantic colours
+   (good/warn/crit/done) hold green, amber, red and teal, so a page hue must
+   not borrow any of those or a page tint starts reading as a status.
+
+   The plane is the palest of the three by a distance. It is the only one that
+   covers the whole window, so it is the one that has to stay quiet: cards are
+   white, and a plane with real chroma in it turns a data screen into a
+   coloured screen. Distinguishable side by side is the whole requirement -
+   it does not have to be nameable on its own.
+   --------------------------------------------------------------------------- */
+
+:root {
+  --orders-accent: #a2542a;
+  --orders-soft: #f6ece4;
+  --orders-plane: #f7f1ea;
+
+  --components-accent: #1f6b46;
+  --components-soft: #e6f2eb;
+  --components-plane: #ecf3ee;
+
+  --schedule-accent: #1c5cab;
+  --schedule-soft: #e8effa;
+  --schedule-plane: #ebf1f9;
+
+  --vendors-accent: #6b3fa0;
+  --vendors-soft: #efe8f8;
+  --vendors-plane: #f1ecf9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --orders-accent: #e0954d;
+    --orders-soft: #33230f;
+    --orders-plane: #12100a;
+
+    --components-accent: #58c98a;
+    --components-soft: #10291c;
+    --components-plane: #0a1210;
+
+    --schedule-accent: #4d92e8;
+    --schedule-soft: #16283f;
+    --schedule-plane: #0a0e17;
+
+    --vendors-accent: #a884e0;
+    --vendors-soft: #241a38;
+    --vendors-plane: #110b17;
+  }
+}
+
+/* Inside the page: the accent. */
+.page-orders { --accent: var(--orders-accent); --accent-soft: var(--orders-soft); }
+.page-components { --accent: var(--components-accent); --accent-soft: var(--components-soft); }
+.page-vendors { --accent: var(--vendors-accent); --accent-soft: var(--vendors-soft); }
 .page-schedule {
-  --accent: #1c5cab;
-  --accent-soft: #e8effa;
+  --accent: var(--schedule-accent);
+  --accent-soft: var(--schedule-soft);
   /* Height of the sticky day bar. The work-centre headers stick directly below
      it, so the two have to agree on one number or they overlap. */
   --daybar-h: 52px;
 }
 
-@media (prefers-color-scheme: dark) {
-  .page-orders { --accent: #e0954d; --accent-soft: #33230f; }
-  .page-components { --accent: #58c98a; --accent-soft: #10291c; }
-  .page-schedule { --accent: #4d92e8; --accent-soft: #16283f; }
-  .page-vendors { --accent: #a884e0; --accent-soft: #241a38; }
+/* Behind the page: the plane.
+
+   Set on <body> rather than on the page itself, because the background that
+   covers the window is the body's - main is a 2100px column with margins, so
+   painting it there leaves the plane showing down both sides and under short
+   pages. The page class is on <main>, and a custom property cannot travel
+   back up the tree, hence :has(). A browser without :has() gets the neutral
+   plane and loses nothing but the tint; the accent and the tab still say
+   where you are.
+
+   --plane is also the text colour on a filled accent (`.pager button.on`,
+   `button.pill.late.on`), so retinting it here keeps that text in the same
+   family as the page rather than leaving one stray neutral. */
+body:has(.page-orders) {
+  --plane: var(--orders-plane);
+  --page-accent: var(--orders-accent);
+  --page-soft: var(--orders-soft);
+}
+body:has(.page-components) {
+  --plane: var(--components-plane);
+  --page-accent: var(--components-accent);
+  --page-soft: var(--components-soft);
+}
+body:has(.page-schedule) {
+  --plane: var(--schedule-plane);
+  --page-accent: var(--schedule-accent);
+  --page-soft: var(--schedule-soft);
+}
+body:has(.page-vendors) {
+  --plane: var(--vendors-plane);
+  --page-accent: var(--vendors-accent);
+  --page-soft: var(--vendors-soft);
 }
 
 * { box-sizing: border-box; }
@@ -131,8 +210,24 @@ a { color: var(--accent); }
   position: sticky;
   top: 0;
   z-index: 30;
-  border-bottom: 1px solid var(--rule);
-  background: var(--surface);
+  /* Above the page: the header takes the page's hue too.
+
+     It sits outside <main>, so it cannot see the page's own --accent - which
+     is why the hues are global tokens and why --page-accent / --page-soft are
+     set on <body> beside --plane. Those three declarations are the whole
+     per-page treatment; nothing below here knows which page it is on.
+
+     The accent band is 1px of border plus a 2px inset shadow rather than a
+     3px border, because --header-h is a fixed 54px that everything sticky
+     below the header offsets against. A thicker border would push the header
+     taller and leave every sticky bar 2px adrift, showing a sliver of the
+     content scrolling behind it. An inset shadow paints inside the box and
+     costs no height.
+
+     The fallbacks are for /signin, which has no page class. */
+  border-bottom: 1px solid var(--page-accent, var(--rule));
+  box-shadow: inset 0 -2px 0 var(--page-accent, transparent);
+  background: var(--page-soft, var(--surface));
   padding: 0 22px;
   display: flex;
   align-items: center;
@@ -155,7 +250,18 @@ a { color: var(--accent); }
   white-space: nowrap;
 }
 .nav a:hover { background: var(--surface-2); color: var(--ink); }
-.nav a[aria-current="page"] { background: var(--surface-2); color: var(--ink); font-weight: 600; }
+
+/* The current tab is now the pale one on a tinted bar, not the tinted one on
+   a pale bar - the bar took the page's hue, so a tinted pill would sink into
+   it. Reading as a card lifted off the header is also what a tab is.
+
+   It comes after the :hover rule and matches at the same specificity, so
+   hovering the tab you are already on does not wash it back out. */
+.nav a[aria-current="page"] {
+  background: var(--surface);
+  color: var(--page-accent, var(--ink));
+  font-weight: 600;
+}
 
 main { padding: 22px; max-width: 2100px; margin: 0 auto; }
 

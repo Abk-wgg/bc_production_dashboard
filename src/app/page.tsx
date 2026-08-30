@@ -23,6 +23,20 @@ import { withWorkCenters, buildWorkCenterMap } from "@/lib/work-center";
 import { summarise, today } from "@/lib/board";
 import { formatNumber } from "@/lib/format";
 
+// Spelled out in full, unlike the other three. `title.template` in the root
+// layout applies to CHILD segments only, and this page is the root segment
+// itself - so it would have shipped a tab reading just "Orders".
+export const metadata = { title: "Orders · Production board" };
+
+// Only visible in an installed app window - an ordinary browser tab strip is
+// the browser's to paint, not ours. Matches the header, which it sits above.
+export const viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f6ece4" },
+    { media: "(prefers-color-scheme: dark)", color: "#33230f" },
+  ],
+};
+
 // Read at request time, never at build. The board is a live view; a page
 // baked at build time would show whatever BC said the day it was deployed.
 export const dynamic = "force-dynamic";

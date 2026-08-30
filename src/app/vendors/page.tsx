@@ -12,6 +12,17 @@ import { buildScheduledStartMap, buildWorkCenterMap } from "@/lib/work-center";
 import { buildIncomingMap, buildStockMap, toBoardComponent } from "@/lib/chain";
 import { toVendorLines } from "@/lib/vendor-weeks";
 
+export const metadata = { title: "Vendors" };
+
+// Only visible in an installed app window - an ordinary browser tab strip is
+// the browser's to paint, not ours. Matches the header, which it sits above.
+export const viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#efe8f8" },
+    { media: "(prefers-color-scheme: dark)", color: "#241a38" },
+  ],
+};
+
 export const dynamic = "force-dynamic";
 
 export default async function VendorsPage() {

@@ -1,17 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Production orders">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="By vendor">
   <!--
     The schedule in miniature: three work-centre columns of different heights.
     Kept to four solid shapes because the only size that matters is 16px in a
     browser tab, where anything finer turns to mush. The filled tile means it
     stays visible against a light or a dark tab strip.
 
-    One icon per page, same glyph, the tile in that page's hue - rust. At
+    One icon per page, same glyph, the tile in that page's hue - purple. At
     16px the colour is the only difference a tab strip can carry, and keeping
     the glyph identical is what still reads as one app rather than four. The
     fill is the page's light-theme accent: mid-dark and saturated, so the
     light bars hold and the tile itself shows on either tab strip.
   -->
-  <rect width="32" height="32" rx="7" fill="#a2542a"/>
+  <rect width="32" height="32" rx="7" fill="#6b3fa0"/>
   <rect x="7"  y="8"  width="5" height="16" rx="1.5" fill="#f0f0eb"/>
   <rect x="14" y="13" width="5" height="11" rx="1.5" fill="#f0f0eb" opacity="0.75"/>
   <rect x="21" y="17" width="5" height="7"  rx="1.5" fill="#f0f0eb" opacity="0.5"/>
