@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import DataTable, { type Column } from "@/components/data-table";
 import type { BoardComponent, BoardOrder } from "@/lib/types";
-import { RELEASED, statusName } from "@/lib/status";
+import { statusName } from "@/lib/status";
 import { isBehindPlan } from "@/lib/board";
 import { floorLabel, floorTone, isOnTheLine } from "@/lib/floor";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
@@ -143,7 +143,6 @@ export default function OrdersTable({
   stockKnown: boolean;
   asOf: string;
 }) {
-  const [releasedOnly, setReleasedOnly] = useState(true);
   const [behindOnly, setBehindOnly] = useState(false);
   const [onLineOnly, setOnLineOnly] = useState(false);
   const [startedOnly, setStartedOnly] = useState(false);
@@ -164,13 +163,25 @@ export default function OrdersTable({
   const rows = useMemo(
     () =>
       orders.filter((order) => {
-        if (releasedOnly && order.status !== RELEASED) return false;
         if (behindOnly && !isBehindPlan(order, asOf)) return false;
         if (onLineOnly && !isOnTheLine(order.floor.status)) return false;
         if (startedOnly && order.made <= 0) return false;
         return true;
       }),
-    [orders, releasedOnly, behindOnly, onLineOnly, startedOnly, asOf],
+    [orders, behindOnly, onLineOnly, startedOnly, asOf],
+  );
+
+  // Stable, so DataTable's memoised rows survive a panel opening. An inline
+  // arrow here is a new function every render, which invalidates all of them.
+  const renderPanel = useCallback(
+    (row: BoardOrder) => (
+      <OrderDetail
+        order={row}
+        components={componentsByOrder[row.no] ?? []}
+        stockKnown={stockKnown}
+      />
+    ),
+    [componentsByOrder, stockKnown],
   );
 
   return (
@@ -181,23 +192,9 @@ export default function OrdersTable({
       exportName="production-orders"
       emptyMessage="No production orders match the current view."
       defaultSort={{ key: "startingDate", dir: "asc" }}
-      expand={(row) => (
-        <OrderDetail
-          order={row}
-          components={componentsByOrder[row.no] ?? []}
-          stockKnown={stockKnown}
-        />
-      )}
+      expand={renderPanel}
       toolbar={
         <>
-          <button
-            type="button"
-            className={releasedOnly ? "on" : undefined}
-            onClick={() => setReleasedOnly((v) => !v)}
-            title="Released is the status the shop floor works to. Turn this off to include planned and finished orders."
-          >
-            {releasedOnly ? "Released only" : "All statuses"}
-          </button>
           <button
             type="button"
             className={behindOnly ? "on" : undefined}

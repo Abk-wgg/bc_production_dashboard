@@ -92,9 +92,25 @@ that never says which field. Check with `?$top=1` and no `$select` first.
 
 ### What is in scope (`src/lib/scope.ts`)
 
-Two rules decide which rows exist at all. They are applied in the **data layer**,
-so the tables, the schedule and the JSON feeds cannot disagree.
+Three rules decide which rows exist at all. They are applied in the **data
+layer**, so the tables, the schedule and the JSON feeds cannot disagree.
 
+- **Released only, everywhere.** Simulated, Planned and Firm Planned are not
+  real work yet; Finished is over. Released is what the shop floor works to.
+  - This used to be a **`Released only` toggle on each of the three tables**,
+    defaulted on. Three components owned one rule between them, which is how
+    they come to disagree, and the JSON feeds had no copy of it at all — so
+    Excel and Power BI saw a wider board than the screen did.
+  - Removing the buttons changed nothing on screen. All 982 order headers are
+    already Released, because the feed is the `Released_Production_Order_Excel`
+    sheet, so the toggle was a no-op on two of the three tables. On components
+    it dropped 4 lines, all on `OLCRELPROD303`. The JSON feed for components
+    went 1,961 → 1,957 to match.
+  - **Routing lines are deliberately not filtered.** 360 of 1,340 read
+    Finished, but 358 of those belong to orders that are not on the board at
+    all, so they join to nothing. The remaining 2 are the only routing lines
+    their orders have — filtering would strip `OLCRELPROD303` and
+    `OLCRELPROD856` of a work centre to hide nothing.
 - **Orders: `Location Code = PRODUCTION` only.** The other location, TRADE, is
   bought-in and labelling work — real orders, but not this board, and they
   outnumber production roughly fifteen to one.
@@ -165,6 +181,28 @@ remove real work from the board.
   - The component "Due Date" (5407) is not a promise either: it is the parent
     order's planned start on 1,923 of 1,957 manually-flushed released lines, so
     the column is labelled **Needed**. Nearly always, not always — 34 differ.
+- **The component list is one row per order, not one per line.** 1,957 lines
+  collapse to 703 orders, median 2 lines each. Nobody picks "a component line" —
+  they pick an order, and the question in front of them is whether it can run.
+  The lines sit behind the row, in the same `expand` panel the orders page uses;
+  `component-groups.ts` does the grouping and is pure,
+  `order-components-panel.tsx` draws it.
+  - **The filters narrow the lines, and only then are they grouped.** The other
+    way round would count lines the filter had already excluded, so a row would
+    disagree with its own panel about how many lines it has.
+  - Prod. Order No. leads and is the default sort. The old first column was
+    Location, which reads `PRODUCTION` on every row.
+  - Order-level "Fully picked" is true only when every line is, and sorts on the
+    proportion, so part-picked orders sit between untouched and finished rather
+    than alphabetically among them.
+  - `Next Delivery` comes from the **short** lines only. A covered line has an
+    incoming PO too, and showing its date would read as waiting on a delivery
+    when nothing is being waited on.
+  - The Excel export follows what is on screen, so it is now one row per order.
+    The line-level data is still whole at `/api/prod-order-components`.
+  - It expands in place rather than opening over the top. A modal was tried and
+    was wrong for this: the whole page is a list of orders, and reading down it
+    means opening several in turn, which a modal makes you dismiss between.
 - **`NETVAPS Earliest Start Date` and `NETVAPS EMAD` are empty** on all 980
   routing lines sampled — same trap as `Finished Quantity`. The VAPS output that
   *is* populated: `Starting Date`, `Ending Date`, and `NETVAPS Scheduled`
@@ -196,6 +234,21 @@ remove real work from the board.
   `src/lib/floor.ts` and match the shop floor's own picking control board on
   979 of 982 orders; the three that differ have a blank timestamp in that
   board's export.
+- **A started order has no picking problem, so the pick flag comes off it.**
+  The floor cannot press Start until the components are picked, and picking
+  moves that stock out of inventory — so the availability maths reads "no
+  components available" and says the opposite of the truth. The schedule card
+  drops the pick pill and the "N lines short" count once floor status is
+  anything but Not started. Paused counts as started: it is only reachable
+  through a Start. Applied in `src/app/schedule/page.tsx`, where the flag is
+  never computed rather than computed and then hidden.
+  - The data bears it out. Across the 94 orders the floor has touched, 90% of
+    component lines have `Qty. Picked` above zero and 80% read `Completely
+    Picked`. Across the 888 it has not touched, both are 5%.
+  - **`Completely Picked` on the 5405 header is another header to distrust.**
+    It reads false on all 94 started orders, while those same orders' own
+    component lines read true on 80% of themselves. Third instance of the
+    rule: when a field exists on the header and the line, trust the line.
 - **`Line Leader` (the operator's name) is deliberately absent from the
   snapshot.** The mapper reads it and the board shows it, so it appears as soon
   as the app reads BC live; the snapshot is a file that leaves the server, and
@@ -210,8 +263,10 @@ remove real work from the board.
 - A source that is not configured returns a `not-configured` result and the page
   explains itself. Only a genuine failure throws.
 - **`PARK: <thing>` means write it down, do not start it.** It goes to
-  `BACKLOG.md` and the current task carries on. `BACKLOG` lists what is
-  parked. This exists because context gets summarised between sessions and
+  `BACKLOG.md` and the current task carries on. `PARK!:` puts it at the top.
+  `BACKLOG` lists what is parked; `WORK THE BACKLOG` works through it top-down.
+  `TODO:`, `AWAITING:` and `FUTURE:` record work that cannot be done yet, and are
+  never started unasked. This exists because context gets summarised between sessions and
   loose "we could also..." offers do not survive it.
 
 ## Known gaps (deliberate, not oversights)
@@ -235,3 +290,9 @@ npm run build    # produces .next/standalone
 npm start
 npm test         # pure logic, no BC access needed
 ```
+
+**`dev` and `build` share `.next`.** Running one while the other is up leaves
+development and production artifacts mixed in that folder, and the symptom is
+not an error: pages serve correctly for a while, then start returning 404 —
+which reads exactly like a routing bug you just introduced. Stop the dev server,
+`rm -rf .next`, then build; clear it again before going back to dev.

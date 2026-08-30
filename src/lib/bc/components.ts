@@ -8,17 +8,20 @@ import "server-only";
 import { fetchService } from "./client";
 import { toComponent } from "./map";
 import type { Fetched, ProdOrderComponent } from "../types";
-import { isManuallyFlushed } from "../scope";
+import { isBoardStatus, isManuallyFlushed } from "../scope";
 
 /**
- * Component lines that need a person to do something - manually flushed only.
- * Forward and backward flushed lines are consumed by BC on their own, so they
- * are not work anybody tracks. See src/lib/scope.ts.
+ * Component lines that need a person to do something: manually flushed, on a
+ * Released order. Forward and backward flushed lines are consumed by BC on its
+ * own, so they are not work anybody tracks. See src/lib/scope.ts.
  */
 export async function getProdOrderComponents(): Promise<Fetched<ProdOrderComponent>> {
   const result = await fetchService("prodOrderComponents");
   const rows = result.rows
     .map(toComponent)
-    .filter((component) => isManuallyFlushed(component.flushingMethod));
+    .filter(
+      (component) =>
+        isManuallyFlushed(component.flushingMethod) && isBoardStatus(component.status),
+    );
   return { ...result, rows };
 }

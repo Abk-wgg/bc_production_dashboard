@@ -10,14 +10,14 @@ import { getStock } from "@/lib/bc/inventory";
 import { getOpenPurchaseLines } from "@/lib/bc/purchasing";
 import {
   buildIncomingMap,
-  buildPickStateMap,
+  pickStateFor,
   buildProgressMap,
   buildSalesOrderMap,
   buildStockMap,
   shortagesFor,
   type PickState,
 } from "@/lib/chain";
-import { buildFloorMap, countFloorStates, NOT_ON_THE_LINE } from "@/lib/floor";
+import { buildFloorMap, countFloorStates, isOnTheLine, NOT_ON_THE_LINE } from "@/lib/floor";
 import Tiles from "@/components/tiles";
 import type { BoardOrder } from "@/lib/types";
 import { withWorkCenters } from "@/lib/work-center";
@@ -75,11 +75,19 @@ export default async function SchedulePage() {
   const pickStateByOrder: Record<string, PickState> = {};
   if (!stock.partial) {
     for (const [orderNo, lines] of Object.entries(componentsByOrder)) {
+      // An order the floor has started cannot have a picking problem. BC will
+      // not let an operator press Start until the components are picked to it,
+      // and picking moves that stock out of inventory - so the shortage maths
+      // reads "none available" and says the exact opposite of the truth.
+      //
+      // Paused counts as started, because it can only be reached through a
+      // Start. The floor pill already says what is happening to these orders.
+      if (isOnTheLine(floor.get(orderNo)?.status ?? "not-started")) continue;
+
       const short = shortagesFor(lines, stockByItem, incomingByItem).length;
       if (short > 0) shortagesByOrder[orderNo] = short;
+      pickStateByOrder[orderNo] = pickStateFor(lines, stockByItem);
     }
-    const states = buildPickStateMap(componentsByOrder, stockByItem);
-    for (const [orderNo, state] of states) pickStateByOrder[orderNo] = state;
   }
   // The tiles read the shop floor, not the stock. "Can this be picked" is a
   // question about the warehouse; "what is running right now" is the one the

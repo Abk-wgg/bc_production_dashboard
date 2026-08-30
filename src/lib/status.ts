@@ -20,8 +20,8 @@ export function statusName(status: number): string {
  * Some published pages expose the option CAPTION ("Released") instead of its
  * index, so accept either. Unknown values fall back to Released rather than
  * Simulated: an unrecognised status on a live order is far more likely to be a
- * real, in-progress one than a simulation, and defaulting to 0 would hide it
- * behind the "Released only" filter.
+ * real, in-progress one than a simulation, and defaulting to 0 would drop the
+ * row: Released is the only status the board keeps. See src/lib/scope.ts.
  */
 export function toStatus(value: unknown): number {
   const n = Number(value);

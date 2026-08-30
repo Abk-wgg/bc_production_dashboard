@@ -7,6 +7,8 @@
 //
 // Pure functions, no BC access.
 
+import { RELEASED } from "./status";
+
 /**
  * Only orders made at our own PRODUCTION location. The other location, TRADE,
  * is bought-in and labelling work - real orders, but not what this board is
@@ -16,6 +18,23 @@ export const BOARD_LOCATION = "PRODUCTION";
 
 export function isBoardLocation(locationCode: string): boolean {
   return locationCode.trim().toUpperCase() === BOARD_LOCATION;
+}
+
+/**
+ * Released is the only status the board carries. It is what the shop floor
+ * works to: Simulated, Planned and Firm Planned are not real work yet, and
+ * Finished is over.
+ *
+ * This was three copies of a "Released only" toggle - one per table, each
+ * defaulted on and, as far as anyone could tell, never turned off. Three
+ * components owning a rule between them is how they come to disagree, and the
+ * JSON feeds had no copy at all, so Excel and Power BI saw a wider board than
+ * the screen did. One rule, applied once, in the data layer.
+ */
+export const BOARD_STATUS = RELEASED;
+
+export function isBoardStatus(status: number): boolean {
+  return status === BOARD_STATUS;
 }
 
 /**

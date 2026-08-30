@@ -42,10 +42,13 @@ import {
 import { toStatus, statusName, RELEASED, FINISHED } from "../src/lib/status.ts";
 import { formatDate, formatLineNo } from "../src/lib/format.ts";
 import { safeCallbackUrl } from "../src/lib/safe-redirect.ts";
+import { groupByOrder, isShort, shortfallOf } from "../src/lib/component-groups.ts";
 import {
   isBoardLocation,
+  isBoardStatus,
   isManuallyFlushed,
   toFlushingMethod,
+  BOARD_STATUS,
   MANUAL,
 } from "../src/lib/scope.ts";
 import {
@@ -412,6 +415,17 @@ test("the board is only the PRODUCTION location", () => {
   assert.equal(isBoardLocation(""), false);
 });
 
+test("the board is only Released orders", () => {
+  assert.equal(BOARD_STATUS, RELEASED);
+  assert.equal(isBoardStatus(RELEASED), true);
+  // Not yet real work.
+  assert.equal(isBoardStatus(0), false);
+  assert.equal(isBoardStatus(1), false);
+  assert.equal(isBoardStatus(2), false);
+  // Over. Finished orders are history, not a board.
+  assert.equal(isBoardStatus(FINISHED), false);
+});
+
 test("flushing method accepts the option index or its caption", () => {
   assert.equal(toFlushingMethod(0), MANUAL);
   assert.equal(toFlushingMethod("0"), MANUAL);
@@ -769,4 +783,126 @@ test("every work centre in the real data is production", () => {
   // quarter of the board into a filter nobody opens again.
   for (const wc of ["PROD-1", "PROD-2", "PROD-3", "PROD-4", "PROD-5", "PROD-6", "PROD-7", "PROD-SHORTFILL", "UNPLANNED", "OUTSIDE-LINE"])
     assert.equal(categorise(wc), "production", wc);
+});
+
+// --- component grouping ----------------------------------------------------
+
+/** A component line with only the fields the grouping actually reads. */
+function comp(over: Record<string, unknown> = {}) {
+  return {
+    prodOrderNo: "OLC1",
+    prodOrderLineNo: 10000,
+    lineNo: 10000,
+    status: 3,
+    itemNo: "RMC/1",
+    description: "Thing",
+    unitOfMeasureCode: "EACH",
+    quantityPer: 1,
+    quantity: 0,
+    remainingQuantity: 100,
+    expectedQuantity: 100,
+    locationCode: "PRODUCTION",
+    binCode: "",
+    variantCode: "",
+    dueDate: "2026-09-02",
+    flushingMethod: 0,
+    qtyPicked: 0,
+    completelyPicked: false,
+    emad: null,
+    workCenter: "PROD-1",
+    available: 500,
+    earliestExpiry: null,
+    onOrder: 0,
+    nextReceipt: null,
+    ...over,
+  } as never;
+}
+
+test("component lines group into one row per order, in order-number order", () => {
+  const groups = groupByOrder(
+    [
+      comp({ prodOrderNo: "OLC2" }),
+      comp({ prodOrderNo: "OLC1", lineNo: 20000 }),
+      comp({ prodOrderNo: "OLC1" }),
+    ],
+    true,
+  );
+  assert.equal(groups.length, 2);
+  assert.deepEqual(groups.map((g) => g.prodOrderNo), ["OLC1", "OLC2"]);
+  assert.equal(groups[0].lineCount, 2);
+  assert.equal(groups[0].lines.length, 2);
+});
+
+test("quantities are summed and picking is counted across the lines", () => {
+  const [group] = groupByOrder(
+    [
+      comp({ remainingQuantity: 100, qtyPicked: 40, completelyPicked: true }),
+      comp({ lineNo: 20000, remainingQuantity: 250, qtyPicked: 10 }),
+    ],
+    true,
+  );
+  assert.equal(group.remaining, 350);
+  assert.equal(group.picked, 50);
+  assert.equal(group.pickedLines, 1);
+  // One unpicked line is enough - an order is not ready until all of it is.
+  assert.equal(group.fullyPicked, false);
+});
+
+test("an order is fully picked only when every line is", () => {
+  const [group] = groupByOrder(
+    [
+      comp({ completelyPicked: true }),
+      comp({ lineNo: 20000, completelyPicked: true }),
+    ],
+    true,
+  );
+  assert.equal(group.fullyPicked, true);
+  assert.equal(group.pickedLines, 2);
+});
+
+test("shortages are only counted when the stock feed is complete", () => {
+  const short = comp({ remainingQuantity: 100, available: 30, nextReceipt: "2026-09-10" });
+  const known = groupByOrder([short], true)[0];
+  assert.equal(known.shortLines, 1);
+  assert.equal(known.shortBy, 70);
+  assert.equal(known.nextReceipt, "2026-09-10");
+
+  // A partial stock feed means an item with no row is unknown, not absent.
+  const unknown = groupByOrder([short], false)[0];
+  assert.equal(unknown.shortLines, 0);
+  assert.equal(unknown.shortBy, 0);
+  assert.equal(unknown.nextReceipt, null);
+});
+
+test("next delivery comes from short lines only", () => {
+  const [group] = groupByOrder(
+    [
+      // Covered: its delivery is not news, so it must not set the date.
+      comp({ remainingQuantity: 10, available: 900, nextReceipt: "2026-09-01" }),
+      comp({ lineNo: 20000, remainingQuantity: 100, available: 0, nextReceipt: "2026-09-20" }),
+    ],
+    true,
+  );
+  assert.equal(group.nextReceipt, "2026-09-20");
+});
+
+test("needed date and expiry take the earliest across the lines", () => {
+  const [group] = groupByOrder(
+    [
+      comp({ dueDate: "2026-09-08", earliestExpiry: "2027-01-01" }),
+      comp({ lineNo: 20000, dueDate: "2026-09-02", earliestExpiry: null }),
+      comp({ lineNo: 30000, dueDate: null, earliestExpiry: "2026-12-01" }),
+    ],
+    true,
+  );
+  assert.equal(group.neededDate, "2026-09-02");
+  assert.equal(group.earliestExpiry, "2026-12-01");
+});
+
+test("a line is short only when something is left to consume", () => {
+  assert.equal(isShort(comp({ remainingQuantity: 100, available: 30 })), true);
+  assert.equal(shortfallOf(comp({ remainingQuantity: 100, available: 30 })), 70);
+  // Nothing left to pick is not a shortage, however little stock there is.
+  assert.equal(isShort(comp({ remainingQuantity: 0, available: 0 })), false);
+  assert.equal(shortfallOf(comp({ remainingQuantity: 0, available: 0 })), 0);
 });

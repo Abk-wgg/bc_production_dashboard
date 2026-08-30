@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, useMemo, useState, type ReactNode } from "react";
+import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 
 export type Column<T> = {
   key: string;
@@ -120,13 +120,15 @@ export default function DataTable<T>({
     XLSX.writeFile(book, `${exportName}-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
-  function toggleRow(key: string) {
+  // Stable identity, so the memoised rows below are not invalidated by it on
+  // every render. The functional update means it needs no dependencies.
+  const toggleRow = useCallback((key: string) => {
     setOpen((prev) => {
       const next = new Set(prev);
       if (!next.delete(key)) next.add(key);
       return next;
     });
-  }
+  }, []);
 
   const hasColumnFilters = Object.values(columnFilters).some((v) => v.trim() !== "");
 
@@ -209,55 +211,16 @@ export default function DataTable<T>({
             <tbody>
               {sorted.map((row, index) => {
                 const key = rowKey(row, index);
-                const isOpen = open.has(key);
-                const cells = columns.map((column) => (
-                  <td
-                    key={column.key}
-                    className={[
-                      column.numeric ? "num" : "",
-                      column.wrap ? "wrap" : "",
-                      column.nowrap ? "nowrap" : "",
-                    ]
-                      .filter(Boolean)
-                      .join(" ")}
-                  >
-                    {column.render ? column.render(row) : column.cell(row)}
-                  </td>
-                ));
-
-                if (!expand) return <tr key={key}>{cells}</tr>;
-
                 return (
-                  <Fragment key={key}>
-                    <tr
-                      className={isOpen ? "ord open" : "ord"}
-                      tabIndex={0}
-                      role="button"
-                      aria-expanded={isOpen}
-                      onClick={(e) => {
-                        // A link or a button inside the row does its own job.
-                        // Swallowing that click would make the cell look broken.
-                        if ((e.target as HTMLElement).closest("a, button, input")) return;
-                        toggleRow(key);
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.target !== e.currentTarget) return;
-                        if (e.key !== "Enter" && e.key !== " ") return;
-                        e.preventDefault();
-                        toggleRow(key);
-                      }}
-                    >
-                      <td className="exp">
-                        <span className="caret">{isOpen ? "▼" : "▶"}</span>
-                      </td>
-                      {cells}
-                    </tr>
-                    {isOpen && (
-                      <tr className="det">
-                        <td colSpan={columns.length + 1}>{expand(row)}</td>
-                      </tr>
-                    )}
-                  </Fragment>
+                  <TableRow
+                    key={key}
+                    rowId={key}
+                    row={row}
+                    columns={columns}
+                    isOpen={open.has(key)}
+                    onToggle={toggleRow}
+                    expand={expand}
+                  />
                 );
               })}
             </tbody>
@@ -271,3 +234,85 @@ export default function DataTable<T>({
     </>
   );
 }
+
+/**
+ * One row, memoised.
+ *
+ * Opening a panel changes the state of a single row, but without this every row
+ * in the table re-renders to do it. The component list is 703 rows of 13 cells,
+ * so one click was reconciling about nine thousand elements in order to turn a
+ * caret round, and the open felt as slow as it sounds.
+ *
+ * memo only holds if the props keep their identities between renders, so
+ * `columns`, `expand` and `onToggle` all have to be stable in their owners -
+ * an inline arrow for `expand` silently undoes the whole thing.
+ */
+function TableRowInner<T>({
+  row,
+  rowId,
+  columns,
+  isOpen,
+  onToggle,
+  expand,
+}: {
+  row: T;
+  rowId: string;
+  columns: Column<T>[];
+  isOpen: boolean;
+  onToggle: (key: string) => void;
+  expand?: (row: T) => ReactNode;
+}) {
+  const cells = columns.map((column) => (
+    <td
+      key={column.key}
+      className={[
+        column.numeric ? "num" : "",
+        column.wrap ? "wrap" : "",
+        column.nowrap ? "nowrap" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {column.render ? column.render(row) : column.cell(row)}
+    </td>
+  ));
+
+  if (!expand) return <tr>{cells}</tr>;
+
+  return (
+    <>
+      <tr
+        className={isOpen ? "ord open" : "ord"}
+        tabIndex={0}
+        role="button"
+        aria-expanded={isOpen}
+        onClick={(e) => {
+          // A link or a button inside the row does its own job. Swallowing that
+          // click would make the cell look broken.
+          if ((e.target as HTMLElement).closest("a, button, input")) return;
+          onToggle(rowId);
+        }}
+        onKeyDown={(e) => {
+          if (e.target !== e.currentTarget) return;
+          if (e.key !== "Enter" && e.key !== " ") return;
+          e.preventDefault();
+          onToggle(rowId);
+        }}
+      >
+        <td className="exp">
+          <span className="caret">{isOpen ? "▼" : "▶"}</span>
+        </td>
+        {cells}
+      </tr>
+      {isOpen && (
+        <tr className="det">
+          <td colSpan={columns.length + 1}>{expand(row)}</td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+// memo() erases the generic. The cast puts it back, so callers still get their
+// row type checked against the columns they pass.
+const TableRow = memo(TableRowInner) as typeof TableRowInner;

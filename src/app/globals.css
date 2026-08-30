@@ -35,6 +35,15 @@
   /* Height of .site-header, which is sticky at top: 0. Anything else that
      sticks has to clear it or it pins underneath and vanishes. */
   --header-h: 54px;
+  /* The deep header treatment. Navy rather than another grey, for a header
+     that has to separate itself from the surface directly behind it: the
+     schedule's pinned column headers, floating over cards that are the same
+     colour they are, and the header of a table nested inside an open row.
+     Not page-tinted - it is the same object wherever it appears. */
+  --head-deep: #1e3a63;
+  --head-deep-ink: #d7e4f7;
+  --head-deep-rule: #325a92;
+  --head-deep-crit: #f2aeae;
 }
 
 /* The picking board's values, unchanged. */
@@ -58,6 +67,12 @@
     --crit-ink: #e07171;
     --idle-ink: #d88180;
     --shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
+    /* Deeper than the light navy - these sit on a near-black plane, where the
+       lighter value would glow. */
+    --head-deep: #15263c;
+    --head-deep-ink: #a8c8ef;
+    --head-deep-rule: #29466e;
+    --head-deep-crit: #e8a0a0;
   }
 }
 
@@ -70,29 +85,12 @@
   /* Height of the sticky day bar. The work-centre headers stick directly below
      it, so the two have to agree on one number or they overlap. */
   --daybar-h: 52px;
-  /* The pinned work-centre header. Only the schedule has one, so its tokens
-     live here. Navy rather than another grey: once the header is floating
-     over the cards it has stopped being part of a column and should read as
-     chrome. Deep enough in both themes to carry pale text. */
-  --pinned-head: #1e3a63;
-  --pinned-head-ink: #d7e4f7;
-  --pinned-head-rule: #325a92;
-  --pinned-head-crit: #f2aeae;
 }
 
 @media (prefers-color-scheme: dark) {
   .page-orders { --accent: #e0954d; --accent-soft: #33230f; }
   .page-components { --accent: #58c98a; --accent-soft: #10291c; }
-  .page-schedule {
-    --accent: #4d92e8;
-    --accent-soft: #16283f;
-    /* Deeper than the light navy - this one sits on a near-black plane, where
-       the lighter value would glow. */
-    --pinned-head: #15263c;
-    --pinned-head-ink: #a8c8ef;
-    --pinned-head-rule: #29466e;
-    --pinned-head-crit: #e8a0a0;
-  }
+  .page-schedule { --accent: #4d92e8; --accent-soft: #16283f; }
 }
 
 * { box-sizing: border-box; }
@@ -636,12 +634,15 @@ table.cmp { font-size: 13px; }
    must not be, or it floats over the rows as the page moves. */
 table.cmp thead th {
   position: static;
-  background: var(--surface-2);
+  /* Was --surface-2, the same colour as the panel it sits in, so the header
+     read as another row rather than as the top of a table. */
+  background: var(--head-deep);
+  color: var(--head-deep-ink);
+  border-bottom: 1px solid var(--head-deep-rule);
   padding: 6px 9px;
   font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--muted);
   white-space: nowrap;
 }
 table.cmp thead th.num, table.cmp td.num { text-align: right; }
@@ -741,15 +742,15 @@ table.cmp td.nm { color: var(--ink-2); min-width: 220px; }
   /* Cards are --surface-2 as well, so at rest the header is the same colour as
      the card below it. Invisible until one scrolls underneath - which is the
      whole bug this state fixes. */
-  background: var(--pinned-head);
-  color: var(--pinned-head-ink);
-  border-bottom-color: var(--pinned-head-rule);
+  background: var(--head-deep);
+  color: var(--head-deep-ink);
+  border-bottom-color: var(--head-deep-rule);
   border-radius: 0;
   box-shadow: 0 8px 12px -8px rgba(0, 0, 0, 0.5);
 }
 
 /* The unassigned column's red sinks into the navy, so it lightens with it. */
-.board.pinned .wc-head.unassigned { color: var(--pinned-head-crit); }
+.board.pinned .wc-head.unassigned { color: var(--head-deep-crit); }
 
 @media (prefers-reduced-motion: reduce) {
   .day-bar,

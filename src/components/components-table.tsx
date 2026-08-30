@@ -1,13 +1,33 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import DataTable, { type Column } from "@/components/data-table";
+import OrderComponentsPanel from "@/components/order-components-panel";
 import type { BoardComponent } from "@/lib/types";
-import { RELEASED, statusName } from "@/lib/status";
-import { formatDate, formatLineNo, formatNumber } from "@/lib/format";
+import { groupByOrder, isShort, type OrderComponents } from "@/lib/component-groups";
+import { formatDate, formatNumber } from "@/lib/format";
 import { UNASSIGNED } from "@/lib/work-center";
 
-const COLUMNS: Column<BoardComponent>[] = [
+/**
+ * One row per production order. Prod. Order No. leads and the table sorts on
+ * it, because that is the thing being looked up - the old first column was
+ * Location, which reads PRODUCTION on all 1,957 rows.
+ *
+ * Everything per-line - item, description, quantities, expiry - is in the panel
+ * behind the row rather than here. Sixteen columns of it, repeated once per
+ * component, was a spreadsheet of the underlying table rather than a view of
+ * the work.
+ */
+const COLUMNS: Column<OrderComponents>[] = [
+  {
+    key: "prodOrderNo",
+    label: "Prod. Order No.",
+    cell: (r) => r.prodOrderNo,
+    nowrap: true,
+    // Same treatment as the No. column on the orders page: monospace, no
+    // colour. The caret is what says the row opens.
+    render: (r) => <span className="code">{r.prodOrderNo}</span>,
+  },
   { key: "locationCode", label: "Location", cell: (r) => r.locationCode, nowrap: true },
   {
     key: "workCenter",
@@ -16,69 +36,67 @@ const COLUMNS: Column<BoardComponent>[] = [
     nowrap: true,
   },
   {
-    key: "dueDate",
+    key: "neededDate",
     // BC calls this the component's Due Date, but it is not a promise to
-    // anyone: on all 1,000 rows checked it is exactly the parent order's
-    // planned start - the day the material has to be at the line. Labelled for
-    // what it is, so this page and the orders page talk about the same date.
+    // anyone: it is the parent order's planned start - the day the material has
+    // to be at the line. Labelled for what it is.
     label: "Needed",
-    cell: (r) => formatDate(r.dueDate),
-    sortValue: (r) => r.dueDate ?? "",
+    cell: (r) => formatDate(r.neededDate),
+    sortValue: (r) => r.neededDate ?? "",
     nowrap: true,
   },
-  { key: "prodOrderNo", label: "Prod. Order No.", cell: (r) => r.prodOrderNo, nowrap: true },
   {
-    key: "lineNo",
-    label: "Line",
-    cell: (r) => formatLineNo(r.lineNo),
-    sortValue: (r) => r.lineNo,
+    key: "lineCount",
+    label: "Lines",
+    cell: (r) => String(r.lineCount),
+    sortValue: (r) => r.lineCount,
     numeric: true,
   },
-  { key: "itemNo", label: "Item No.", cell: (r) => r.itemNo, nowrap: true },
-  { key: "description", label: "Description", cell: (r) => r.description, wrap: true },
-  { key: "status", label: "Status", cell: (r) => statusName(r.status), nowrap: true },
   {
-    key: "remainingQuantity",
+    key: "remaining",
     label: "Remaining",
-    cell: (r) => formatNumber(r.remainingQuantity),
-    sortValue: (r) => r.remainingQuantity,
+    cell: (r) => formatNumber(r.remaining),
+    sortValue: (r) => r.remaining,
     numeric: true,
   },
   {
-    key: "qtyPicked",
+    key: "picked",
     label: "Picked",
-    cell: (r) => formatNumber(r.qtyPicked),
-    sortValue: (r) => r.qtyPicked,
+    cell: (r) => formatNumber(r.picked),
+    sortValue: (r) => r.picked,
     numeric: true,
   },
   {
-    key: "completelyPicked",
+    key: "fullyPicked",
     label: "Fully Picked",
-    cell: (r) => (r.completelyPicked ? "Yes" : "No"),
+    cell: (r) => (r.fullyPicked ? "Yes" : `${r.pickedLines} of ${r.lineCount}`),
+    // Sorted on the proportion, so a part-picked order sits between an
+    // untouched one and a finished one rather than alphabetically among them.
+    sortValue: (r) => r.pickedLines / r.lineCount,
     nowrap: true,
     render: (r) =>
-      r.completelyPicked ? <span className="pill ok">Yes</span> : <span className="pill">No</span>,
+      r.fullyPicked ? (
+        <span className="pill ok">Yes</span>
+      ) : (
+        <span className="pill part">
+          {r.pickedLines} of {r.lineCount}
+        </span>
+      ),
   },
-  { key: "unitOfMeasureCode", label: "UoM", cell: (r) => r.unitOfMeasureCode, nowrap: true },
   {
-    key: "available",
-    label: "In Stock",
-    // Available, not on-hand: on-hand includes quantity already committed
-    // elsewhere, so it can say "plenty" about material you cannot touch.
-    cell: (r) => formatNumber(r.available),
-    sortValue: (r) => r.available,
-    numeric: true,
+    key: "shortLines",
+    label: "Short",
+    cell: (r) => (r.shortLines > 0 ? `${r.shortLines} line${r.shortLines === 1 ? "" : "s"}` : ""),
+    sortValue: (r) => r.shortLines,
+    nowrap: true,
+    render: (r) => (r.shortLines > 0 ? <span className="pill late">{r.shortLines}</span> : null),
   },
   {
     key: "shortBy",
     label: "Short By",
-    cell: (r) => (isShort(r) ? formatNumber(r.remainingQuantity - r.available) : ""),
-    sortValue: (r) => (isShort(r) ? r.remainingQuantity - r.available : 0),
+    cell: (r) => (r.shortBy > 0 ? formatNumber(r.shortBy) : ""),
+    sortValue: (r) => r.shortBy,
     numeric: true,
-    render: (r) =>
-      isShort(r) ? (
-        <span className="pill late">{formatNumber(r.remainingQuantity - r.available)}</span>
-      ) : null,
   },
   {
     key: "nextReceipt",
@@ -96,11 +114,6 @@ const COLUMNS: Column<BoardComponent>[] = [
   },
 ];
 
-/** Not enough free stock to finish what is left of the line. */
-function isShort(row: BoardComponent): boolean {
-  return row.remainingQuantity > 0 && row.available < row.remainingQuantity;
-}
-
 export default function ComponentsTable({
   components,
   initialOrder,
@@ -115,43 +128,47 @@ export default function ComponentsTable({
    */
   stockKnown: boolean;
 }) {
-  const [releasedOnly, setReleasedOnly] = useState(true);
   const [order, setOrder] = useState(initialOrder);
   const [outstandingOnly, setOutstandingOnly] = useState(false);
   const [shortOnly, setShortOnly] = useState(false);
 
   const columns = useMemo(
-    () => (stockKnown ? COLUMNS : COLUMNS.filter((c) => c.key !== "shortBy")),
+    () =>
+      stockKnown ? COLUMNS : COLUMNS.filter((c) => c.key !== "shortLines" && c.key !== "shortBy"),
     [stockKnown],
   );
 
   const rows = useMemo(() => {
     const wanted = order.trim().toLowerCase();
-    return components.filter((component) => {
-      if (releasedOnly && component.status !== RELEASED) return false;
+    // Filter the lines, then group. The other way round would count lines the
+    // filter had already excluded, so the row and its panel would disagree.
+    const lines = components.filter((component) => {
       if (outstandingOnly && component.remainingQuantity <= 0) return false;
       if (wanted && !component.prodOrderNo.toLowerCase().includes(wanted)) return false;
       if (shortOnly && stockKnown && !isShort(component)) return false;
       return true;
     });
-  }, [components, releasedOnly, outstandingOnly, shortOnly, stockKnown, order]);
+    return groupByOrder(lines, stockKnown);
+  }, [components, outstandingOnly, shortOnly, stockKnown, order]);
+
+  // Stable, so DataTable's memoised rows survive a panel opening. An inline
+  // arrow here is a new function every render, which invalidates all of them.
+  const renderPanel = useCallback(
+    (row: OrderComponents) => <OrderComponentsPanel group={row} stockKnown={stockKnown} />,
+    [stockKnown],
+  );
 
   return (
     <DataTable
       rows={rows}
       columns={columns}
-      rowKey={(row) => `${row.prodOrderNo}-${row.prodOrderLineNo}-${row.lineNo}`}
-      exportName="prod-order-components"
-      emptyMessage="No components match the current view."
+      rowKey={(row) => row.prodOrderNo}
+      exportName="components-by-order"
+      emptyMessage="No production orders match the current view."
+      defaultSort={{ key: "prodOrderNo", dir: "asc" }}
+      expand={renderPanel}
       toolbar={
         <>
-          <button
-            type="button"
-            className={releasedOnly ? "on" : undefined}
-            onClick={() => setReleasedOnly((v) => !v)}
-          >
-            {releasedOnly ? "Released only" : "All statuses"}
-          </button>
           <button
             type="button"
             className={outstandingOnly ? "on" : undefined}

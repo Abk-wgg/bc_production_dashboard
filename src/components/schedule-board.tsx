@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardOrder, ProdOrderComponent } from "@/lib/types";
 import { completionOf, pickStateLabel, type PickState } from "@/lib/chain";
-import { RELEASED } from "@/lib/status";
 import { floorLabel, floorTone } from "@/lib/floor";
 import { formatDate, formatDayHeading, formatNumber } from "@/lib/format";
 import {
@@ -50,7 +49,6 @@ export default function ScheduleBoard({
   // means a work centre that appears in BC tomorrow shows up by default instead
   // of being silently absent because it was not in a list saved today.
   const [hidden, setHidden] = useState<string[]>([]);
-  const [releasedOnly, setReleasedOnly] = useState(true);
   // The "from" filter stays off. Defaulting it to today would hide the backlog
   // completely, and a production schedule that silently omits every late order
   // is worse than useless - it looks reassuringly empty.
@@ -77,13 +75,12 @@ export default function ScheduleBoard({
   const beforeCentres = useMemo(
     () =>
       orders.filter((order) => {
-        if (releasedOnly && order.status !== RELEASED) return false;
         // An order with no scheduled start cannot sit on a day, so a "from"
         // filter necessarily excludes it.
         if (from && (!order.scheduledStart || order.scheduledStart < from)) return false;
         return true;
       }),
-    [orders, releasedOnly, from],
+    [orders, from],
   );
 
   const countByCentre = useMemo(() => {
@@ -233,13 +230,6 @@ export default function ScheduleBoard({
           )}
         </div>
 
-        <button
-          type="button"
-          className={releasedOnly ? "on" : undefined}
-          onClick={() => setReleasedOnly((v) => !v)}
-        >
-          {releasedOnly ? "Released only" : "All statuses"}
-        </button>
         <label style={{ fontSize: 13.5, color: "var(--muted)" }}>
           From{" "}
           <input
