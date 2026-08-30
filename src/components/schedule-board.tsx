@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardOrder, ProdOrderComponent } from "@/lib/types";
 import { completionOf, pickStateLabel, type PickState } from "@/lib/chain";
 import { RELEASED } from "@/lib/status";
-import { floorLabel, floorTone, isOnTheLine } from "@/lib/floor";
+import { floorLabel, floorTone } from "@/lib/floor";
 import { formatDate, formatDayHeading, formatNumber } from "@/lib/format";
 import {
   groupByDay,
@@ -162,8 +162,38 @@ export default function ScheduleBoard({
           ? shownCentres[0]
           : `${shownCentres.length} of ${centres.length}`;
 
+  // --- pinned state --------------------------------------------------------
+  //
+  // CSS has no :stuck selector, so a 1px sentinel sits immediately above the
+  // day bar and an IntersectionObserver reports when it leaves the top of the
+  // viewport. That is the moment the day bar pins, and the column headers pin
+  // with it - they sit 6px below, so treating them as one state is accurate.
+  const [pinned, setPinned] = useState(false);
+  const sentinelRef = useRef<HTMLDivElement>(null);
+  const boardVisible = !allHidden && days.length > 0;
+
+  useEffect(() => {
+    const sentinel = sentinelRef.current;
+    if (!sentinel) {
+      // The board is filtered away entirely; nothing can be pinned.
+      setPinned(false);
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => setPinned(!entry.isIntersecting),
+      // The day bar pins at 54px, not 0, because the site header sits there and
+      // is sticky too. Pulling the observation area down by the same amount is
+      // what makes the state flip at the moment it actually pins rather than a
+      // header's height later.
+      { threshold: 0, rootMargin: "-54px 0px 0px 0px" },
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [boardVisible]);
+
   return (
-    <>
+    <div className={pinned ? "board pinned" : "board"}>
       <div className="toolbar" style={{ marginBottom: 12 }}>
         <div className="dropdown" ref={centresRef}>
           <button
@@ -265,6 +295,9 @@ export default function ScheduleBoard({
         <p className="empty">No orders planned on or after this date.</p>
       ) : (
         <>
+          {/* Watched by the IntersectionObserver above - it marks the exact
+              scroll position at which the day bar starts sticking. */}
+          <div className="stick-sentinel" ref={sentinelRef} aria-hidden="true" />
           <div className="day-bar">
             <button type="button" onClick={() => setDayIndex(index - 1)} disabled={index === 0}>
               ← Previous
@@ -318,7 +351,7 @@ export default function ScheduleBoard({
           )}
         </>
       )}
-    </>
+    </div>
   );
 }
 
@@ -350,17 +383,21 @@ function OrderCard({
         <Link className="no" href={`/components?order=${encodeURIComponent(order.no)}`}>
           {order.no}
         </Link>
-        {isOnTheLine(order.floor.status) ? (
-          <span className={`fl fl-${floorTone(order.floor.status)}`}>
-            {floorLabel(order.floor.status)}
-          </span>
-        ) : (
-          !order.scheduled && (
-            <span className="pill" title="Not scheduled by VAPS">
-              unscheduled
-            </span>
-          )
-        )}
+        {/* Always the shop-floor state, "Not started" included. It used to show
+            only for orders on the line and otherwise fell back to an
+            "unscheduled" pill driven by NETVAPS Scheduled - a field no
+            published page exposes, so it read false everywhere and that pill
+            appeared on every card that was not currently running. */}
+        <span
+          className={`fl fl-${floorTone(order.floor.status) || "none"}`}
+          title={
+            order.floor.operator
+              ? `${floorLabel(order.floor.status)} — ${order.floor.operator}`
+              : floorLabel(order.floor.status)
+          }
+        >
+          {floorLabel(order.floor.status)}
+        </span>
       </div>
 
       {order.description && <p className="desc">{order.description}</p>}

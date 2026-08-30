@@ -209,6 +209,10 @@ remove real work from the board.
 - Pages stay server components; interactivity lives in `src/components/`.
 - A source that is not configured returns a `not-configured` result and the page
   explains itself. Only a genuine failure throws.
+- **`PARK: <thing>` means write it down, do not start it.** It goes to
+  `BACKLOG.md` and the current task carries on. `BACKLOG` lists what is
+  parked. This exists because context gets summarised between sessions and
+  loose "we could also..." offers do not survive it.
 
 ## Known gaps (deliberate, not oversights)
 

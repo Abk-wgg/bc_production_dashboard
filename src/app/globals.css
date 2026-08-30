@@ -26,7 +26,15 @@
   --good-ink: #0a7d0a;
   --warn-ink: #8a5c00;
   --crit-ink: #b32d2d;
+  /* "Not started" on the shop floor. A muted red rather than grey: an order
+     nobody has pressed a button on is a state to notice, not a blank.
+     Darkened from the dark-theme #d88180 to keep 12px bold text legible on a
+     white card - same hue, same family. */
+  --idle-ink: #a34d4c;
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.04);
+  /* Height of .site-header, which is sticky at top: 0. Anything else that
+     sticks has to clear it or it pins underneath and vanishes. */
+  --header-h: 54px;
 }
 
 /* The picking board's values, unchanged. */
@@ -48,6 +56,7 @@
     --good-ink: #4cc14c;
     --warn-ink: #fab219;
     --crit-ink: #e07171;
+    --idle-ink: #d88180;
     --shadow: 0 1px 0 rgba(0, 0, 0, 0.3);
   }
 }
@@ -55,12 +64,35 @@
 /* Per-page accent. Kept subtle now the palette carries the weight. */
 .page-orders { --accent: #a2542a; --accent-soft: #f6ece4; }
 .page-components { --accent: #1f6b46; --accent-soft: #e6f2eb; }
-.page-schedule { --accent: #1c5cab; --accent-soft: #e8effa; }
+.page-schedule {
+  --accent: #1c5cab;
+  --accent-soft: #e8effa;
+  /* Height of the sticky day bar. The work-centre headers stick directly below
+     it, so the two have to agree on one number or they overlap. */
+  --daybar-h: 52px;
+  /* The pinned work-centre header. Only the schedule has one, so its tokens
+     live here. Navy rather than another grey: once the header is floating
+     over the cards it has stopped being part of a column and should read as
+     chrome. Deep enough in both themes to carry pale text. */
+  --pinned-head: #1e3a63;
+  --pinned-head-ink: #d7e4f7;
+  --pinned-head-rule: #325a92;
+  --pinned-head-crit: #f2aeae;
+}
 
 @media (prefers-color-scheme: dark) {
   .page-orders { --accent: #e0954d; --accent-soft: #33230f; }
   .page-components { --accent: #58c98a; --accent-soft: #10291c; }
-  .page-schedule { --accent: #4d92e8; --accent-soft: #16283f; }
+  .page-schedule {
+    --accent: #4d92e8;
+    --accent-soft: #16283f;
+    /* Deeper than the light navy - this one sits on a near-black plane, where
+       the lighter value would glow. */
+    --pinned-head: #15263c;
+    --pinned-head-ink: #a8c8ef;
+    --pinned-head-rule: #29466e;
+    --pinned-head-crit: #e8a0a0;
+  }
 }
 
 * { box-sizing: border-box; }
@@ -357,9 +389,15 @@ td.nowrap { white-space: nowrap; }
   grid-auto-flow: column;
   grid-auto-columns: minmax(265px, 1fr);
   gap: 12px;
-  overflow-x: auto;
   align-items: start;
   padding-bottom: 8px;
+  /* Deliberately NOT overflow-x: auto.
+     An element that scrolls in any axis becomes the reference for
+     position: sticky inside it, so the column headers would pin to the top of
+     THIS box - which never scrolls vertically - instead of to the viewport.
+     That is: they would not pin at all. Letting the page scroll sideways when
+     there are many centres is what makes the headers stay put without an inner
+     scroll pane and the second vertical scrollbar it would bring. */
 }
 
 .wc-column {
@@ -372,6 +410,12 @@ td.nowrap { white-space: nowrap; }
   min-width: 0;
 }
 .wc-head {
+  /* Stays visible while a long column scrolls past, sitting just under the day
+     bar - so you can always tell which centre you are reading. z-index below
+     the day bar's so it slides under rather than over it. */
+  position: sticky;
+  top: calc(var(--header-h, 54px) + var(--daybar-h, 52px));
+  z-index: 4;
   background: var(--surface-2);
   color: var(--ink-2);
   border-bottom: 1px solid var(--rule-strong);
@@ -535,7 +579,22 @@ td.nowrap { white-space: nowrap; }
 .fl-run { background: rgba(12, 163, 12, 0.14); color: var(--good-ink); border-color: rgba(12, 163, 12, 0.3); }
 .fl-pause { background: rgba(250, 178, 25, 0.16); color: var(--warn-ink); border-color: rgba(250, 178, 25, 0.4); }
 .fl-qa { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
-.fl-none { color: var(--muted); }
+.fl-none { color: var(--idle-ink); }
+
+/* A pill, not bare text. "Not started" is a real state the floor reports, so it
+   gets the same shape and weight as Running and Paused - the picking control
+   board draws it that way, and the eye scans a column for pill outlines rather
+   than reading words. The wash is the same translucent-overlay trick Running
+   and Paused use, so fill and border hold across both themes and only the text
+   colour flips.
+   Scoped to .fl.fl-none because orders-table.tsx also uses .fl-none on its own
+   for bare text - an em-dash, and "Not started on the floor" - where a
+   background and border with no padding or radius would just look like a
+   smudge behind the words. */
+.fl.fl-none {
+  background: rgba(216, 129, 128, 0.16);
+  border-color: rgba(216, 129, 128, 0.45);
+}
 
 /* --- expandable rows ------------------------------------------------------ */
 
@@ -646,3 +705,53 @@ table.cmp td.nm { color: var(--ink-2); min-width: 220px; }
 .dropdown-item:hover { background: var(--surface-2); color: var(--ink); }
 .dropdown-item input { margin: 0; accent-color: var(--accent); }
 .dropdown-item .count { margin-left: auto; }
+
+/* The day heading and its Previous / Next controls stay put while a long day
+   scrolls past. Sticky against the page, not an inner scroll pane - a pane
+   would put a second vertical scrollbar on the board. */
+.day-bar {
+  position: sticky;
+  /* Clears the site header, which is itself sticky at top: 0 with z-index 30.
+     At top: 0 this pinned underneath it and disappeared entirely. */
+  top: var(--header-h, 54px);
+  z-index: 5;
+  background: var(--plane);
+  padding: 10px 0 8px;
+  margin-bottom: 6px;
+}
+
+/* --- pinned state ---------------------------------------------------------
+   CSS has no :stuck selector, so schedule-board.tsx watches a 1px sentinel
+   above the day bar with an IntersectionObserver and sets .pinned once the
+   page has scrolled past it.
+   Everything here would be wrong at rest: a shadow cast over nothing, and
+   square corners on a header that is sitting in the rounded top of its own
+   column. */
+.stick-sentinel { height: 1px; margin-bottom: -1px; }
+
+.day-bar,
+.wc-head {
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease, border-radius 0.15s ease;
+}
+
+.board.pinned .day-bar { box-shadow: 0 8px 14px -10px rgba(0, 0, 0, 0.5); }
+
+.board.pinned .wc-head {
+  /* Cards are --surface-2 as well, so at rest the header is the same colour as
+     the card below it. Invisible until one scrolls underneath - which is the
+     whole bug this state fixes. */
+  background: var(--pinned-head);
+  color: var(--pinned-head-ink);
+  border-bottom-color: var(--pinned-head-rule);
+  border-radius: 0;
+  box-shadow: 0 8px 12px -8px rgba(0, 0, 0, 0.5);
+}
+
+/* The unassigned column's red sinks into the navy, so it lightens with it. */
+.board.pinned .wc-head.unassigned { color: var(--pinned-head-crit); }
+
+@media (prefers-reduced-motion: reduce) {
+  .day-bar,
+  .wc-head { transition: none; }
+}

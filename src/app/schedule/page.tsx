@@ -14,11 +14,10 @@ import {
   buildProgressMap,
   buildSalesOrderMap,
   buildStockMap,
-  countPickStates,
   shortagesFor,
   type PickState,
 } from "@/lib/chain";
-import { buildFloorMap, NOT_ON_THE_LINE } from "@/lib/floor";
+import { buildFloorMap, countFloorStates, NOT_ON_THE_LINE } from "@/lib/floor";
 import Tiles from "@/components/tiles";
 import type { BoardOrder } from "@/lib/types";
 import { withWorkCenters } from "@/lib/work-center";
@@ -82,7 +81,14 @@ export default async function SchedulePage() {
     const states = buildPickStateMap(componentsByOrder, stockByItem);
     for (const [orderNo, state] of states) pickStateByOrder[orderNo] = state;
   }
-  const counts = countPickStates(new Map(Object.entries(pickStateByOrder)));
+  // The tiles read the shop floor, not the stock. "Can this be picked" is a
+  // question about the warehouse; "what is running right now" is the one the
+  // person standing in front of this board is asking. Pick state still rides on
+  // each card, where it belongs to a specific order.
+  const floorCounts = countFloorStates(
+    rows.map((order) => order.no),
+    floor,
+  );
 
   return (
     <main className="page-schedule">
@@ -102,35 +108,32 @@ export default async function SchedulePage() {
         <>
           <SnapshotNotice result={orders} />
 
-          {!stock.partial && (
-            <Tiles
-              tiles={[
-                {
-                  label: "Can pick complete",
-                  value: counts["can-pick"],
-                  tone: "good",
-                  note: "Every component line has the stock to cover it",
-                },
-                {
-                  label: "Some components missing",
-                  value: counts["some-missing"],
-                  tone: "warn",
-                  note: "Can start, will stall partway",
-                },
-                {
-                  label: "No components available",
-                  value: counts["none-available"],
-                  tone: "crit",
-                  note: "Cannot start at all",
-                },
-                {
-                  label: "Nothing to pick",
-                  value: counts["nothing-to-pick"],
-                  note: "No manually flushed lines left to consume",
-                },
-              ]}
-            />
-          )}
+          <Tiles
+            tiles={[
+              {
+                label: "Running",
+                value: floorCounts.running,
+                tone: "good",
+                note: "Last press was Start, Restart or a booking",
+              },
+              {
+                label: "Paused",
+                value: floorCounts.paused,
+                tone: "warn",
+                note: "Started, then stopped and not restarted",
+              },
+              {
+                label: "QA booked",
+                value: floorCounts["qa-booked"],
+                note: "Last press was QA Book",
+              },
+              {
+                label: "Not started",
+                value: floorCounts["not-started"],
+                note: "No button press against this order at all",
+              },
+            ]}
+          />
           {routing.source === "not-configured" && (
             <div className="notice">
               <h2>Work centres unavailable</h2>
