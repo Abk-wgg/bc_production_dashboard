@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardOrder, ProdOrderComponent } from "@/lib/types";
 import { completionOf, pickStateLabel, type PickState } from "@/lib/chain";
 import { RELEASED } from "@/lib/status";
@@ -12,15 +12,14 @@ import {
   initialDayIndex,
   locationsIn,
   toWorkCenterColumns,
+  workCentersIn,
   NO_DATE,
 } from "@/lib/schedule";
-import { UNASSIGNED, orderHasCategory } from "@/lib/work-center";
+import { UNASSIGNED, centersOf, hasVisibleCenter } from "@/lib/work-center";
 
 // One colour per location so a card's origin is readable at a glance from
 // across the room, which is how this board actually gets used.
 const LOCATION_COLOURS = ["#c9ada7", "#7fa6c9", "#8fcf9b", "#e0c074", "#c19ad8", "#6fc5c5"];
-
-type Category = "production" | "trade" | null;
 
 // Which pill style each pick state wears. "Can pick" is green because it is the
 // one that needs no attention; the other two are the ones to act on.
@@ -47,7 +46,10 @@ export default function ScheduleBoard({
   pickStateByOrder: Record<string, PickState>;
   asOf: string;
 }) {
-  const [category, setCategory] = useState<Category>(null);
+  // Which centres are switched OFF, not which are on. Storing the exclusions
+  // means a work centre that appears in BC tomorrow shows up by default instead
+  // of being silently absent because it was not in a list saved today.
+  const [hidden, setHidden] = useState<string[]>([]);
   const [releasedOnly, setReleasedOnly] = useState(true);
   // The "from" filter stays off. Defaulting it to today would hide the backlog
   // completely, and a production schedule that silently omits every late order
@@ -65,17 +67,40 @@ export default function ScheduleBoard({
     return map;
   }, [orders]);
 
-  const visible = useMemo(
+  // Every centre in the data, not just today's - see workCentersIn.
+  const centres = useMemo(() => workCentersIn(orders), [orders]);
+  const hiddenSet = useMemo(() => new Set(hidden), [hidden]);
+
+  // Split in two so the chip counts can reflect the status and date filters
+  // without counting the centre filter against itself - a chip reading 0
+  // because you switched it off tells you nothing.
+  const beforeCentres = useMemo(
     () =>
       orders.filter((order) => {
         if (releasedOnly && order.status !== RELEASED) return false;
-        if (category && !orderHasCategory(order.workCenter, category)) return false;
         // An order with no scheduled start cannot sit on a day, so a "from"
         // filter necessarily excludes it.
         if (from && (!order.scheduledStart || order.scheduledStart < from)) return false;
         return true;
       }),
-    [orders, releasedOnly, category, from],
+    [orders, releasedOnly, from],
+  );
+
+  const countByCentre = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const order of beforeCentres) {
+      // An order spanning two centres counts in both, exactly as it appears in
+      // both columns.
+      for (const centre of centersOf(order.workCenter)) {
+        counts.set(centre, (counts.get(centre) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [beforeCentres]);
+
+  const visible = useMemo(
+    () => beforeCentres.filter((order) => hasVisibleCenter(order.workCenter, hiddenSet)),
+    [beforeCentres, hiddenSet],
   );
 
   const days = useMemo(() => groupByDay(visible), [visible]);
@@ -89,36 +114,95 @@ export default function ScheduleBoard({
   const day = days[index];
 
   const columns = useMemo(
-    () => (day ? toWorkCenterColumns(day.orders, category) : []),
-    [day, category],
+    () => (day ? toWorkCenterColumns(day.orders, hiddenSet) : []),
+    [day, hiddenSet],
   );
+
+  const allHidden = centres.length > 0 && hidden.length === centres.length;
+
+  function toggleCentre(centre: string) {
+    setHidden((current) =>
+      current.includes(centre) ? current.filter((c) => c !== centre) : [...current, centre],
+    );
+  }
+
+  const [centresOpen, setCentresOpen] = useState(false);
+  const centresRef = useRef<HTMLDivElement>(null);
+
+  // Close on a click anywhere else, or on Escape. Without both, the panel sits
+  // over the board and the only way out is to find the button again.
+  useEffect(() => {
+    if (!centresOpen) return;
+
+    function onPointerDown(event: MouseEvent) {
+      if (!centresRef.current?.contains(event.target as Node)) setCentresOpen(false);
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setCentresOpen(false);
+    }
+
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [centresOpen]);
+
+  // What the closed button says. Naming the single centre when only one is on
+  // is the case worth spelling out - "1 of 10" would make you open it to find
+  // out which.
+  const shownCentres = centres.filter((centre) => !hiddenSet.has(centre));
+  const centresLabel =
+    hidden.length === 0
+      ? "All centres"
+      : shownCentres.length === 0
+        ? "None"
+        : shownCentres.length === 1
+          ? shownCentres[0]
+          : `${shownCentres.length} of ${centres.length}`;
 
   return (
     <>
       <div className="toolbar" style={{ marginBottom: 12 }}>
-        <button
-          type="button"
-          className={category === null ? "on" : undefined}
-          onClick={() => setCategory(null)}
-        >
-          All centres
-        </button>
-        <button
-          type="button"
-          className={category === "production" ? "on" : undefined}
-          onClick={() => setCategory("production")}
-          title="Work centres whose code starts PROD - our own production."
-        >
-          Production
-        </button>
-        <button
-          type="button"
-          className={category === "trade" ? "on" : undefined}
-          onClick={() => setCategory("trade")}
-          title="Everything else - bought-in and trade centres."
-        >
-          Trade
-        </button>
+        <div className="dropdown" ref={centresRef}>
+          <button
+            type="button"
+            className={hidden.length > 0 ? "on" : undefined}
+            onClick={() => setCentresOpen((open) => !open)}
+            aria-expanded={centresOpen}
+            aria-haspopup="true"
+          >
+            Work centres: {centresLabel} ▾
+          </button>
+
+          {centresOpen && (
+            <div className="dropdown-menu">
+              <div className="dropdown-actions">
+                <button type="button" onClick={() => setHidden([])}>
+                  All
+                </button>
+                <button type="button" onClick={() => setHidden(centres)}>
+                  None
+                </button>
+              </div>
+              {centres.map((centre) => (
+                <label key={centre} className="dropdown-item">
+                  <input
+                    type="checkbox"
+                    checked={!hiddenSet.has(centre)}
+                    onChange={() => toggleCentre(centre)}
+                  />
+                  <span>{centre === UNASSIGNED ? "No work centre" : centre}</span>
+                  {/* The count is what makes this a decision rather than a
+                      guess - you can see what switching a centre off removes. */}
+                  <span className="count">{countByCentre.get(centre) ?? 0}</span>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+
         <button
           type="button"
           className={releasedOnly ? "on" : undefined}
@@ -175,7 +259,9 @@ export default function ScheduleBoard({
         </span>
       </div>
 
-      {days.length === 0 ? (
+      {allHidden ? (
+        <p className="empty">Every work centre is switched off. Turn one back on to see the board.</p>
+      ) : days.length === 0 ? (
         <p className="empty">No orders planned on or after this date.</p>
       ) : (
         <>

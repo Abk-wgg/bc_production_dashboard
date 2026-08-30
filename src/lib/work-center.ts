@@ -132,34 +132,35 @@ export function withWorkCenters(
 export type WorkCenterCategory = "production" | "trade" | "unassigned";
 
 /**
- * Ours, despite not being named PROD-anything.
+ * Centres we send work out to rather than run ourselves.
  *
- * `UNPLANNED` is our own production — work not yet assigned to a line, not work
- * sent out. Judging it on the name filed 236 orders, a quarter of the board,
- * under Trade, where anyone filtering to Production would never see them.
+ * **Currently empty, and that is the finding, not an oversight.** Every one of
+ * the ten centres on this board is ours — `PROD-1` to `PROD-7`,
+ * `PROD-SHORTFILL`, `UNPLANNED` and `OUTSIDE-LINE` — and all 982 orders sit at
+ * Location Code PRODUCTION, because src/lib/scope.ts already excluded the TRADE
+ * location upstream. So the production/trade split here was a second, weaker
+ * implementation of a distinction the scope rule had already made.
+ *
+ * It is kept as a named list rather than deleted because "who does this work"
+ * is a real question that a future centre could reopen. Add to it if one does.
  */
-const PRODUCTION_CENTERS = new Set(["UNPLANNED"]);
-
-/** Centres we send work out to rather than run ourselves. */
-const TRADE_CENTERS = new Set(["OUTSIDE-LINE"]);
+const TRADE_CENTERS = new Set<string>();
 
 /**
  * In-house or sent out?
  *
- * The PROD- prefix is a naming convention, not a rule, so the two sets above
- * are the source of truth and the prefix is only a fallback for a centre
- * neither knows about. **A new work centre needs adding to one of them** —
- * otherwise it lands in whichever bucket its name happens to suggest, which is
- * exactly how UNPLANNED ended up on the wrong side.
+ * Anything not named above is ours. The old rule was `startsWith("PROD")`,
+ * which is a naming convention rather than a fact: it filed `UNPLANNED` (236
+ * orders, a quarter of the board) and `OUTSIDE-LINE` (176) under Trade, where
+ * nobody filtering to Production would ever see them.
+ *
+ * Defaulting the other way round matters. An unrecognised centre now shows up
+ * with the production work where somebody will notice it, instead of in a
+ * bucket nobody opens.
  */
 export function categorise(workCenter: string): WorkCenterCategory {
   if (!workCenter || workCenter === UNASSIGNED) return "unassigned";
-
-  const code = workCenter.toUpperCase();
-  if (PRODUCTION_CENTERS.has(code)) return "production";
-  if (TRADE_CENTERS.has(code)) return "trade";
-
-  return code.startsWith("PROD") ? "production" : "trade";
+  return TRADE_CENTERS.has(workCenter.toUpperCase()) ? "trade" : "production";
 }
 
 /** An order can span centres, so split before categorising. */
@@ -170,10 +171,25 @@ export function splitWorkCenters(value: string): string[] {
     .filter(Boolean);
 }
 
-/** True if the order has at least one centre of that category. */
-export function orderHasCategory(
-  workCenter: string,
-  category: Exclude<WorkCenterCategory, "unassigned">,
-): boolean {
-  return splitWorkCenters(workCenter).some((wc) => categorise(wc) === category);
+/**
+ * The centres an order occupies, as the board keys them.
+ *
+ * An order with no routing line has no centre, and gets the UNASSIGNED bucket
+ * rather than disappearing — those are the ones worth chasing, so they need a
+ * column of their own and a chip that can hide or show them like any other.
+ */
+export function centersOf(workCenter: string): string[] {
+  const centres = splitWorkCenters(workCenter);
+  return centres.length > 0 ? centres : [UNASSIGNED];
+}
+
+/**
+ * True when at least one of the order's centres is still showing.
+ *
+ * Hiding is per centre, not per order, and an order can span two. Hiding one of
+ * them must not remove the order from the other's column — it genuinely needs
+ * both, and dropping it would understate the centre still selected.
+ */
+export function hasVisibleCenter(workCenter: string, hidden: Set<string>): boolean {
+  return centersOf(workCenter).some((centre) => !hidden.has(centre));
 }

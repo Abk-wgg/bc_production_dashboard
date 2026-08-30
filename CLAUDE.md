@@ -110,14 +110,32 @@ remove real work from the board.
 - **Work centre comes from the routing line, not the order.** Table 5405 has no
   work centre. `PRINTING` is excluded from the derived value — it runs on nearly
   every order, so including it would collapse the schedule into one column.
-- **Production vs Trade is an explicit list, not a name prefix.** Ten work
-  centres exist: `PROD-1` to `PROD-7`, `PROD-SHORTFILL`, `UNPLANNED` and
-  `OUTSIDE-LINE`. Only the last is trade — `UNPLANNED` is our own production,
-  work not yet assigned to a line rather than work sent out. The old
-  `startsWith("PROD")` rule filed its 236 orders under Trade, a quarter of the
-  board, invisible to anyone filtering to Production. The sets in
-  `work-center.ts` are the source of truth; the prefix is only a fallback, so
-  **a new work centre needs adding to one of them**.
+- **Nothing on this board is a trade work centre.** Ten centres exist —
+  `PROD-1` to `PROD-7`, `PROD-SHORTFILL`, `UNPLANNED`, `OUTSIDE-LINE` — and all
+  982 orders sit at Location Code PRODUCTION, because `scope.ts` already
+  excluded the TRADE location upstream. The work-centre production/trade split
+  was a second, weaker implementation of a distinction the scope rule had
+  already made. `categorise` now treats every centre as production unless it is
+  named in `TRADE_CENTERS`, which is empty.
+  - The old rule was `startsWith("PROD")`, a naming convention rather than a
+    fact. It filed `UNPLANNED` (236 orders) and `OUTSIDE-LINE` (176) under
+    Trade — 42% of the board — where nobody filtering to Production would see
+    them. Defaulting the other way matters: an unrecognised centre now appears
+    with the production work where someone will notice it.
+  - That left the Production / Trade buttons dead — one showing everything, the
+    other an empty board — so **they were replaced with a work-centre dropdown**:
+    a checklist, one row per centre with its order count. It answers the real
+    questions the two buttons could not: hide UNPLANNED and OUTSIDE-LINE, or
+    look at PROD-1 alone. `categorise` survives only to order the columns, which
+    is now "assigned, then no work centre".
+  - Not a native `<select multiple>`: that needs ctrl-click to deselect, which
+    nobody discovers, and cannot carry the per-centre count. The count is what
+    makes hiding a centre a decision rather than a guess.
+  - It stores which centres are **switched off**, not which are on, so a centre
+    appearing in BC tomorrow shows up by default rather than being silently
+    absent. The list is built from all the orders, not one day's, so the control
+    does not rearrange itself as you page through days. An order spanning two
+    centres survives one being hidden — it genuinely needs both.
 - **So does the routing number**, for a different reason: 5405 *does* carry one,
   and it is wrong. The header reads `ERROR_ROUTE` on 669 of 982 released orders
   where the lines for those same orders read it on 26. `buildRoutingNoMap` in

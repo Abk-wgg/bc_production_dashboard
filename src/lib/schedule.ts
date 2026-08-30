@@ -2,12 +2,7 @@
 // columns. Pure functions - no BC access.
 
 import type { OrderWithWorkCenter } from "./types";
-import {
-  UNASSIGNED,
-  categorise,
-  splitWorkCenters,
-  type WorkCenterCategory,
-} from "./work-center";
+import { categorise, centersOf, type WorkCenterCategory } from "./work-center";
 
 export const NO_DATE = "not-scheduled";
 
@@ -89,21 +84,43 @@ const CATEGORY_ORDER: Record<WorkCenterCategory, number> = {
 };
 
 /**
- * Split one day's orders into work-centre columns. An order that spans two
- * centres appears in both - it genuinely needs both, and hiding it from one
- * would misrepresent that centre's day.
+ * Every work centre present, in the order the columns appear.
+ *
+ * Taken across ALL the orders passed in, not one day's, so the filter chips do
+ * not appear and vanish as you page through days - a control that rearranges
+ * itself under the cursor is unusable.
+ */
+export function workCentersIn(orders: Pick<OrderWithWorkCenter, "workCenter">[]): string[] {
+  const centres = new Set<string>();
+  for (const order of orders) {
+    for (const centre of centersOf(order.workCenter)) centres.add(centre);
+  }
+  return [...centres].sort(byColumnOrder);
+}
+
+function byColumnOrder(a: string, b: string): number {
+  const byCategory = CATEGORY_ORDER[categorise(a)] - CATEGORY_ORDER[categorise(b)];
+  if (byCategory !== 0) return byCategory;
+  return a.localeCompare(b, undefined, { numeric: true });
+}
+
+/**
+ * Split one day's orders into work-centre columns, dropping any centre the
+ * viewer has hidden.
+ *
+ * An order that spans two centres appears in both - it genuinely needs both,
+ * and hiding it from one would misrepresent that centre's day. By the same
+ * logic, hiding one centre does not remove such an order from the other.
  */
 export function toWorkCenterColumns<T extends OrderWithWorkCenter>(
   orders: T[],
-  category: Exclude<WorkCenterCategory, "unassigned"> | null,
+  hidden: Set<string> = new Set(),
 ): WorkCenterColumn<T>[] {
   const byCentre = new Map<string, T[]>();
 
   for (const order of orders) {
-    const centres = splitWorkCenters(order.workCenter);
-    const keys = centres.length > 0 ? centres : [UNASSIGNED];
-    for (const centre of keys) {
-      if (category && categorise(centre) !== category) continue;
+    for (const centre of centersOf(order.workCenter)) {
+      if (hidden.has(centre)) continue;
       if (!byCentre.has(centre)) byCentre.set(centre, []);
       byCentre.get(centre)!.push(order);
     }
@@ -115,11 +132,9 @@ export function toWorkCenterColumns<T extends OrderWithWorkCenter>(
       category: categorise(workCenter),
       orders: [...group].sort((a, b) => a.no.localeCompare(b.no, undefined, { numeric: true })),
     }))
-    .sort((a, b) => {
-      const byCategory = CATEGORY_ORDER[a.category] - CATEGORY_ORDER[b.category];
-      if (byCategory !== 0) return byCategory;
-      return a.workCenter.localeCompare(b.workCenter, undefined, { numeric: true });
-    });
+    // Same comparator as the filter chips, so a centre sits in the same place
+    // in both and the eye can move between them without re-reading.
+    .sort((a, b) => byColumnOrder(a.workCenter, b.workCenter));
 }
 
 /** Distinct location codes present, sorted - drives the colour assignment. */

@@ -10,8 +10,21 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { buildWorkCenterMap, categorise, orderHasCategory, withWorkCenters } from "../src/lib/work-center.ts";
-import { groupByDay, initialDayIndex, toWorkCenterColumns, NO_DATE } from "../src/lib/schedule.ts";
+import {
+  buildWorkCenterMap,
+  categorise,
+  centersOf,
+  hasVisibleCenter,
+  withWorkCenters,
+  UNASSIGNED,
+} from "../src/lib/work-center.ts";
+import {
+  groupByDay,
+  initialDayIndex,
+  toWorkCenterColumns,
+  workCentersIn,
+  NO_DATE,
+} from "../src/lib/schedule.ts";
 import {
   isOutstanding,
   isBehindPlan,
@@ -136,13 +149,12 @@ test("machine centre inside the PRINTING work centre is excluded too", () => {
   assert.equal(map.get("OLCRELPROD100"), undefined);
 });
 
-test("PROD* is production, anything else is trade", () => {
+test("every centre is ours unless it is on the trade list, which is empty", () => {
   assert.equal(categorise("PROD1"), "production");
   assert.equal(categorise("prod-line-2"), "production");
-  assert.equal(categorise("TRADE1"), "trade");
+  // Would have been trade under the old startsWith("PROD") rule.
+  assert.equal(categorise("ANYTHING-ELSE"), "production");
   assert.equal(categorise(""), "unassigned");
-  assert.equal(orderHasCategory("TRADE1, PROD1", "production"), true);
-  assert.equal(orderHasCategory("TRADE1", "production"), false);
 });
 
 test("days sort ascending with unscheduled orders last", () => {
@@ -219,19 +231,18 @@ test("PRINTING does not schedule an order any more than it locates it", () => {
   assert.equal(row.scheduledStart, null);
 });
 
-test("columns order production first, then trade, then unassigned", () => {
+test("columns order production first, then unassigned", () => {
+  // The trade tier is currently unreachable: TRADE_CENTERS is empty because
+  // every centre on this board is ours. CATEGORY_ORDER still supports it.
   const orders = withWorkCenters(
-    [order({ no: "A" }), order({ no: "B" }), order({ no: "C" })],
-    [
-      line({ prodOrderNo: "A", no: "PROD1" }),
-      line({ prodOrderNo: "B", no: "TRADE1", workCenterNo: "TRADE1" }),
-      // C has no routing line at all.
-    ],
+    [order({ no: "A" }), order({ no: "B" })],
+    // B has no routing line at all, so it lands in the unassigned column.
+    [line({ prodOrderNo: "A", no: "PROD1" })],
   );
-  const columns = toWorkCenterColumns(orders, null);
+  const columns = toWorkCenterColumns(orders);
   assert.deepEqual(
     columns.map((c) => c.category),
-    ["production", "trade", "unassigned"],
+    ["production", "unassigned"],
   );
 });
 
@@ -240,19 +251,55 @@ test("an order spanning two centres appears in both columns", () => {
     [order({ no: "A" })],
     [line({ prodOrderNo: "A", no: "PROD1" }), line({ prodOrderNo: "A", no: "TRADE1", workCenterNo: "TRADE1" })],
   );
-  const columns = toWorkCenterColumns(orders, null);
+  const columns = toWorkCenterColumns(orders);
   assert.deepEqual(columns.map((c) => c.workCenter), ["PROD1", "TRADE1"]);
   assert.equal(columns[0].orders[0].no, "A");
   assert.equal(columns[1].orders[0].no, "A");
 });
 
-test("filtering to one category drops the other centre's column", () => {
+test("hiding a work centre drops its column", () => {
+  const orders = withWorkCenters(
+    [order({ no: "A" }), order({ no: "B" })],
+    [line({ prodOrderNo: "A", no: "PROD-1" }), line({ prodOrderNo: "B", no: "UNPLANNED" })],
+  );
+  assert.deepEqual(
+    toWorkCenterColumns(orders, new Set(["UNPLANNED"])).map((c) => c.workCenter),
+    ["PROD-1"],
+  );
+  assert.deepEqual(toWorkCenterColumns(orders, new Set(["PROD-1", "UNPLANNED"])), []);
+});
+
+test("an order spanning two centres survives one of them being hidden", () => {
+  // It genuinely needs both, so hiding OUTSIDE-LINE must not take it out of the
+  // PROD-1 column as well - that would understate the centre still selected.
   const orders = withWorkCenters(
     [order({ no: "A" })],
-    [line({ prodOrderNo: "A", no: "PROD1" }), line({ prodOrderNo: "A", no: "TRADE1", workCenterNo: "TRADE1" })],
+    [line({ prodOrderNo: "A", no: "PROD-1" }), line({ prodOrderNo: "A", no: "OUTSIDE-LINE" })],
   );
-  const columns = toWorkCenterColumns(orders, "production");
-  assert.deepEqual(columns.map((c) => c.workCenter), ["PROD1"]);
+  assert.equal(hasVisibleCenter(orders[0].workCenter, new Set(["OUTSIDE-LINE"])), true);
+  const columns = toWorkCenterColumns(orders, new Set(["OUTSIDE-LINE"]));
+  assert.deepEqual(columns.map((c) => c.workCenter), ["PROD-1"]);
+  assert.equal(columns[0].orders[0].no, "A");
+});
+
+test("hiding every centre an order sits on removes it", () => {
+  const orders = withWorkCenters([order({ no: "A" })], [line({ prodOrderNo: "A", no: "PROD-1" })]);
+  assert.equal(hasVisibleCenter(orders[0].workCenter, new Set(["PROD-1"])), false);
+});
+
+test("an order with no routing line is its own selectable centre", () => {
+  assert.deepEqual(centersOf(""), [UNASSIGNED]);
+  assert.equal(hasVisibleCenter("", new Set([UNASSIGNED])), false);
+  assert.equal(hasVisibleCenter("", new Set()), true);
+});
+
+test("the centre list matches the column order, unassigned last", () => {
+  const orders = withWorkCenters(
+    [order({ no: "A" }), order({ no: "B" }), order({ no: "C" })],
+    [line({ prodOrderNo: "A", no: "PROD-2" }), line({ prodOrderNo: "B", no: "PROD-1" })],
+  );
+  // C has no routing line, so it contributes the unassigned bucket.
+  assert.deepEqual(workCentersIn(orders), ["PROD-1", "PROD-2", UNASSIGNED]);
 });
 
 test("outstanding is driven by status, never by finishedQuantity", () => {
@@ -706,24 +753,20 @@ test("an empty board does not blow up", () => {
 // --- work centre classification ---------------------------------------------
 
 test("UNPLANNED is our own production, not trade", () => {
-  // It is work not yet assigned to a line, not work sent out. The PROD- prefix
-  // is a naming convention, and judging on it filed 236 orders - a quarter of
-  // the board - where nobody filtering to Production would ever see them.
+  // It is work not yet assigned to a line, not work sent out.
   assert.equal(categorise("UNPLANNED"), "production");
   assert.equal(categorise("unplanned"), "production");
-  assert.equal(orderHasCategory("UNPLANNED", "production"), true);
-  assert.equal(orderHasCategory("UNPLANNED", "trade"), false);
 });
 
-test("OUTSIDE-LINE is trade - work we send out", () => {
-  assert.equal(categorise("OUTSIDE-LINE"), "trade");
-  assert.equal(orderHasCategory("OUTSIDE-LINE", "trade"), true);
+test("OUTSIDE-LINE is production too - nothing on this board is trade", () => {
+  // The board is scoped to Location Code PRODUCTION, so scope.ts has already
+  // removed the trade work upstream. All 982 orders are production.
+  assert.equal(categorise("OUTSIDE-LINE"), "production");
 });
 
-test("every work centre in the real data lands where it belongs", () => {
-  // The ten centres actually present. Pinned so a change to the fallback rule
-  // cannot quietly move a quarter of the board again.
-  for (const wc of ["PROD-1", "PROD-2", "PROD-3", "PROD-4", "PROD-5", "PROD-6", "PROD-7", "PROD-SHORTFILL", "UNPLANNED"])
+test("every work centre in the real data is production", () => {
+  // The ten centres actually present. Pinned so a change cannot quietly move a
+  // quarter of the board into a filter nobody opens again.
+  for (const wc of ["PROD-1", "PROD-2", "PROD-3", "PROD-4", "PROD-5", "PROD-6", "PROD-7", "PROD-SHORTFILL", "UNPLANNED", "OUTSIDE-LINE"])
     assert.equal(categorise(wc), "production", wc);
-  assert.equal(categorise("OUTSIDE-LINE"), "trade");
 });
