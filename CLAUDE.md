@@ -89,6 +89,7 @@ three drive the board; the rest fill in the chain around an order:
 | 36 | Sales orders | `sale_order_list_custom_ab` |
 | 37 | Sales lines | `Sales_Lines_Excel` |
 | 27 | Item master | `Item_Card_Excel` |
+| 23 | Vendor cards | (workbook only, see below) |
 
 Over 200 services are published in total, so almost anything else the business
 wants is already reachable without publishing something new.
@@ -197,6 +198,100 @@ remove real work from the board.
   - The component "Due Date" (5407) is not a promise either: it is the parent
     order's planned start on 1,923 of 1,957 manually-flushed released lines, so
     the column is labelled **Needed**. Nearly always, not always — 34 differ.
+- **Components by vendor pages through weeks, a vendor per row** (`/vendors`).
+  Same 1,957 component lines the Component list groups by order, grouped
+  instead by who supplies the item and the week the work runs. Two questions,
+  one dataset: "can this order run" and "what do I owe this supplier, and when".
+  - **The week is a pager, not a column.** It started as a Week column in the
+    table, which made every row repeat the same date and asked the reader to
+    filter their way to one week. The question is asked one week at a time, so
+    the week moved into a bar above the table — the schedule's day bar, one
+    unit up, reusing `.day-bar` because it is the same object with a different
+    unit. Previous still walks back through the whole backlog.
+  - **It opens on the week you are standing in**, not the earliest. A week
+    counts as current until its *Sunday* has gone, so mid-week you land on the
+    week you are in rather than being pushed into the next one — the
+    distinction that a naive "first Monday >= today" gets wrong six days out of
+    seven. `initialWeekIndex` in `weeks.ts`, mirroring `initialDayIndex`.
+  - The **week list is built from all the lines, not the filtered ones**, so
+    switching on "Short only" cannot remove weeks from under the pager and move
+    you somewhere else. Same reasoning as the schedule's work-centre list.
+  - The Excel export is **that week**, because the week is the filter. Every
+    week at once is `/api/vendor-weeks`, which is not paged.
+  - **The date box sits in the week bar and decides which weeks exist**;
+    Previous and Next then walk what is left. A week matches when ANY of its
+    days does, not when its Monday does — typing `300826`, a Sunday, has to
+    find the week you are in rather than nothing. `cm` therefore returns the
+    six weeks that *touch* August, including the two that straddle its ends,
+    and the bar reports the span in **whole weeks** (27 Jul – 6 Sep) because
+    that is what is on screen; naming the month would describe a narrower
+    period than the pager covers.
+  - **The panel is two levels: items, then the orders behind each item.** A
+    buyer is about to raise a purchase order, and a purchase order has one line
+    per item, not one per production order. Four orders needing 143 KG of the
+    same liquid is one line of 572 KG to the vendor.
+    - **This is also the only correct place to compute a shortage.** Stock is
+      the *item's*, and every line of that item carries the same figure — so
+      line by line, all four of those orders see the same 150 KG and each
+      decides it is covered, while the week is 422 KG down. Summing `available`
+      across lines would report 600 KG on a shelf holding 150.
+      `groupLinesByItem` compares total demand against one pool.
+    - Short items lead, then the biggest quantity, then item number — the first
+      two are what needs acting on, the last keeps related codes together once
+      nothing is urgent.
+  - **Remaining carries its unit in brackets, and a mixed week is split rather
+    than summed.** 82 of 83 vendor-weeks use a single unit and read
+    `12,681.926 (KG)`. The one that does not is 94,500 EACH plus 1,047 KG,
+    which a plain total reported as 95,547 of nothing in particular. Every item
+    uses exactly one unit, so the mixing only ever happens at vendor level.
+  - **The vendor row's quantity is shortened; nothing else is.** A column of
+    six-digit numbers is not comparable at a glance, so the summary reads
+    `794k (EACH)` and `14.04 t`. That is safe *only there*: a vendor's weekly
+    total is a magnitude, and nobody orders 621,073 of something in one line.
+    The item quantities in the panel are what gets transcribed onto a purchase
+    order and stay exact, as do `cell()` — which is what the Excel export and
+    the column filter read — and the JSON feed. So nothing acted on or
+    reconciled against BC is ever a rounded figure, and the exact value is on
+    the cell's `title` either way. Kilos become tonnes because that is how a
+    tonne is talked about; counts keep their unit and take k/M, because there
+    is no larger unit of bottle. `compactQuantity` in `format.ts`.
+  - **The supplier comes from `Vendor No.` on the item card (table 27).** It is
+    the only place BC records who supplies a material, and it is well
+    maintained: 7,396 of 10,354 items carry one, 8,261 of which are
+    Replenishment System = Purchase. On the board it resolves **1,796 of 1,957
+    component lines — 92%** — to **26 vendors**.
+  - **An early sample said 0 of 1,000 items had a vendor, and that was the
+    ordering trap, not the truth.** Table reads come back in item-number order,
+    and the first thousand items alphabetically are almost all manufactured
+    (Replenishment System = Prod. Order), which correctly have no vendor.
+    Anything that looks universally empty should be re-counted server-side with
+    `aggregate_bc_table` before being written off. This is the second field to
+    survive that check after `Finished Quantity` failed it.
+  - The 8% with no vendor get **their own row labelled "No vendor set"**, plus a
+    toolbar button that isolates them. A component nobody is recorded as
+    supplying is a purchasing problem, and hiding it is the one thing this page
+    must not do.
+  - **The week is the parent order's planned start, not the component's Due
+    Date.** The two agree on 1,923 of 1,957 lines, but the schedule groups on
+    planned start, and a purchasing page that disagreed with the schedule about
+    which week a job runs in would be worse than no page. `buildScheduledStartMap`
+    is the same map the schedule uses. An order with no routing line falls back
+    to the Due Date rather than dropping off a page whose axis is weeks.
+  - Weeks are **Monday to Sunday with ISO 8601 numbering** (`src/lib/weeks.ts`),
+    matching the `cw`/`lw` terms in the date language and the week the floor
+    works to. ISO numbering is what puts late December in w01 and is what a
+    paper wall planner shows.
+  - Within a week, **the biggest commitment leads**. A buyer opens the page to
+    see what to chase, not who sorts first alphabetically.
+  - **Vendor names come from `Vendor card.xlsx`** in the `raw files` folder
+    beside BC-FEED, found by `dirname` on `BC_WORKBOOK_FILE` so it needs no
+    setting; `BC_VENDOR_WORKBOOK_FILE` overrides. It is the one feed the board
+    can do without — a missing vendor list costs names, not rows, because the
+    code stands in for the name.
+  - `Vendor_No` and `Replenishment_System` had to be **added to the
+    `Items_card_excel` Power Query's `$select`**. The published page carries
+    only eleven fields and a `$select` naming one it does not have fails the
+    whole request with a bare 400, so each addition is checked, not assumed.
 - **The component list is one row per order, not one per line.** 1,957 lines
   collapse to 703 orders, median 2 lines each. Nobody picks "a component line" —
   they pick an order, and the question in front of them is whether it can run.
@@ -326,6 +421,12 @@ npm run build    # produces .next/standalone
 npm start
 npm test         # pure logic, no BC access needed
 ```
+
+**The standalone server does not read the project's `.env.local`.** It runs with
+its own working directory, so `.env.local` has to be copied into
+`.next/standalone` alongside `.next/static` and `public/`. Without it the app
+silently falls back to the bundled snapshot — which looks like working software
+serving 543 component lines instead of 1,957.
 
 **`dev` and `build` share `.next`.** Running one while the other is up leaves
 development and production artifacts mixed in that folder, and the symptom is

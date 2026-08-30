@@ -86,6 +86,11 @@
 /* Per-page accent. Kept subtle now the palette carries the weight. */
 .page-orders { --accent: #a2542a; --accent-soft: #f6ece4; }
 .page-components { --accent: #1f6b46; --accent-soft: #e6f2eb; }
+/* Purple: the one hue not already spoken for. Orders are rust, components
+   green, schedule blue - and the semantic colours (good/warn/crit/done) hold
+   green, amber, red and teal, so an accent must not borrow any of those or a
+   page tint starts reading as a status. */
+.page-vendors { --accent: #6b3fa0; --accent-soft: #efe8f8; }
 .page-schedule {
   --accent: #1c5cab;
   --accent-soft: #e8effa;
@@ -98,6 +103,7 @@
   .page-orders { --accent: #e0954d; --accent-soft: #33230f; }
   .page-components { --accent: #58c98a; --accent-soft: #10291c; }
   .page-schedule { --accent: #4d92e8; --accent-soft: #16283f; }
+  .page-vendors { --accent: #a884e0; --accent-soft: #241a38; }
 }
 
 * { box-sizing: border-box; }
@@ -446,6 +452,47 @@ input.unparsed:focus-visible { outline-color: var(--crit); }
 
 /* The expression the row will write. Monospace, and to the right, so the menu
    reads as label-then-what-it-types rather than as two columns of words. */
+/* A quantity in more than one unit, stacked so neither reads as the total. */
+.mixed { display: flex; flex-direction: column; gap: 1px; line-height: 1.3; }
+.uom { color: var(--muted); font-size: 11.5px; }
+
+/* An item row inside an open vendor-week panel, and the orders behind it.
+
+   A second level of expansion, styled a shade quieter than the outer table so
+   the nesting reads as depth rather than as two tables that happen to touch. */
+table.cmp tr.itm { cursor: pointer; }
+table.cmp tr.itm:hover > td { background: var(--surface-2); }
+table.cmp tr.itm.open > td { background: var(--accent-soft); }
+table.cmp tr.itm .caret { color: var(--muted); font-size: 9px; }
+table.cmp tr.itm.open .caret { color: var(--accent); }
+table.cmp td.strong { font-weight: 600; }
+
+/* The nested table pays for its own inset, so the outer cell adds none. */
+table.cmp tr.itm-det > td { padding: 0; background: var(--surface-2); }
+
+table.cmp.cmp-sub {
+  width: auto;
+  min-width: 60%;
+  margin: 2px 0 8px 34px;
+}
+/* Quieter than the panel header above it - three identical header bands
+   stacked would read as three tables rather than one drilled into twice. */
+table.cmp.cmp-sub thead th {
+  background: transparent;
+  color: var(--muted);
+  border-bottom: 1px solid var(--rule-strong);
+}
+table.cmp.cmp-sub tbody td { border-bottom: 1px solid var(--rule); }
+
+/* The ISO week number beside a week's date. Monospace and tinted, so a column
+   of "w36 31 Aug 2026" reads as number-then-date rather than one long string. */
+.wk {
+  font-family: var(--font-mono), "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
 .dfexpr {
   margin-left: auto;
   padding-left: 12px;
@@ -518,6 +565,9 @@ td.nowrap { white-space: nowrap; }
 
 /* --- schedule ------------------------------------------------------------- */
 
+/* The period pager: the schedule's day bar, and the vendor page's week bar.
+   One control on two pages, so one style - the unit differs, the object does
+   not. */
 .day-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
 .day-title { font-size: 17px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
 

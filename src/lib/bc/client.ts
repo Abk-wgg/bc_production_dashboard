@@ -33,7 +33,8 @@ export type ServiceKey =
   | "purchaseLines"
   | "salesOrders"
   | "salesLines"
-  | "items";
+  | "items"
+  | "vendors";
 
 const SERVICE_ENV: Record<ServiceKey, string> = {
   productionOrders: "BC_WS_PRODUCTION_ORDERS",
@@ -45,6 +46,7 @@ const SERVICE_ENV: Record<ServiceKey, string> = {
   salesOrders: "BC_WS_SALES_ORDERS",
   salesLines: "BC_WS_SALES_LINES",
   items: "BC_WS_ITEMS",
+  vendors: "BC_WS_VENDORS",
 };
 
 // Services already published on the Production environment's Web Services
@@ -64,6 +66,11 @@ const SERVICE_DEFAULT: Record<ServiceKey, string> = {
   salesOrders: "sale_order_list_custom_ab",
   salesLines: "Sales_Lines_Excel",
   items: "Item_Card_Excel",
+  // Not yet confirmed published under this name - the vendor cards reach the
+  // board through their own workbook today. Set BC_WS_VENDORS if the live
+  // service is called something else; an unreadable vendor list costs names,
+  // not rows, because the code stands in for the name.
+  vendors: "Vendor_Card_Excel",
 };
 
 
@@ -116,6 +123,7 @@ type Snapshot = {
   salesOrders?: RawRow[];
   salesLines?: RawRow[];
   items?: RawRow[];
+  vendors?: RawRow[];
 };
 
 // undefined = not looked yet, null = looked and there is none.

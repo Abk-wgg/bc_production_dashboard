@@ -40,11 +40,29 @@ import {
   isOnTheLine,
 } from "../src/lib/floor.ts";
 import { toStatus, statusName, RELEASED, FINISHED } from "../src/lib/status.ts";
-import { formatDate, formatLineNo } from "../src/lib/format.ts";
+import {
+  formatDate,
+  formatLineNo,
+  formatWeekRange,
+  compactQuantity,
+} from "../src/lib/format.ts";
 import { safeCallbackUrl } from "../src/lib/safe-redirect.ts";
 import { groupByOrder, isShort, shortfallOf } from "../src/lib/component-groups.ts";
 import { pageWindow, GAP } from "../src/lib/paging.ts";
 import { DATE_PRESETS, parseDateFilter } from "../src/lib/date-filter.ts";
+import {
+  mondayOf,
+  sundayOf,
+  weekNumber,
+  weekLabel,
+  isPastWeek,
+  initialWeekIndex,
+  daysOf,
+  weeksMatching,
+  weekSpan,
+} from "../src/lib/weeks.ts";
+import { groupByVendorWeek, toVendorLines, vendorsIn, weeksIn } from "../src/lib/vendor-weeks.ts";
+import { groupLinesByItem } from "../src/lib/item-groups.ts";
 import {
   isBoardLocation,
   isBoardStatus,
@@ -1171,4 +1189,524 @@ test("a row with no date never matches", () => {
   assert.equal(hits("cm", ""), false);
   assert.equal(hits("<>cm", ""), false);
   assert.equal(hits(">010101", ""), false);
+});
+
+// --- weeks ------------------------------------------------------------------
+
+test("a week runs Monday to Sunday, whichever day you name", () => {
+  // 2026-08-30 is a Sunday - the end of its week, not the start of the next.
+  assert.equal(mondayOf("2026-08-30"), "2026-08-24");
+  assert.equal(mondayOf("2026-08-31"), "2026-08-31");
+  assert.equal(mondayOf("2026-08-24"), "2026-08-24");
+  assert.equal(sundayOf("2026-08-24"), "2026-08-30");
+});
+
+test("an undated line belongs to no week", () => {
+  // Not this week. Putting an undated line in the current week would overstate
+  // what that week has to be bought for.
+  assert.equal(mondayOf(""), "");
+  assert.equal(weekNumber(""), 0);
+  assert.equal(weekLabel(""), "");
+  assert.equal(sundayOf(""), "");
+});
+
+test("week numbers follow ISO 8601, including across the new year", () => {
+  assert.equal(weekNumber("2026-08-31"), 36);
+  assert.equal(weekLabel("2026-08-31"), "w36");
+  // 1 January 2027 is a Friday, so its week's Thursday is still in 2026 and
+  // the whole week counts as 2026's w53. A naive day-of-year would say w01.
+  assert.equal(weekNumber("2027-01-01"), 53);
+  // 4 January is always in week 1, by definition of the rule.
+  assert.equal(weekNumber("2027-01-04"), 1);
+  assert.equal(weekLabel("2026-01-05"), "w02");
+});
+
+test("the week you are standing in is not a past week", () => {
+  // ASOF is Sunday 30 August, the last day of w35. The week is not over.
+  assert.equal(isPastWeek("2026-08-24", ASOF), false);
+  assert.equal(isPastWeek("2026-08-17", ASOF), true);
+  assert.equal(isPastWeek("2026-08-31", ASOF), false);
+});
+
+// --- vendor weeks -----------------------------------------------------------
+
+const VENDOR_NAMES = new Map([["V1", "Advance Flavour Solutions"]]);
+
+function vlines(lines: unknown[], starts: [string, string][] = []) {
+  return toVendorLines(
+    lines as never,
+    new Map([
+      ["RMC/1", "V1"],
+      ["RMC/2", "V1"],
+    ]),
+    VENDOR_NAMES,
+    new Map(starts),
+  );
+}
+
+test("the week comes from the order's planned start, not the component due date", () => {
+  // The two agree on 1,923 of 1,957 lines. Where they differ the schedule's
+  // date wins, or this page would put a job in a different week from the
+  // schedule showing the same job.
+  const lines = vlines([comp({ dueDate: "2026-09-07" })], [["OLC1", "2026-08-31"]]);
+  assert.equal(lines[0].weekStart, "2026-08-31");
+});
+
+test("an order with no routing line falls back to the component due date", () => {
+  // Dropping the line instead would make it vanish from a page whose whole
+  // axis is weeks.
+  const lines = vlines([comp({ dueDate: "2026-09-02" })]);
+  assert.equal(lines[0].weekStart, "2026-08-31");
+});
+
+test("an item with no vendor keeps its line and gets a row of its own", () => {
+  const lines = toVendorLines(
+    [comp({ itemNo: "RMC/99" })] as never,
+    new Map(),
+    VENDOR_NAMES,
+    new Map([["OLC1", "2026-08-31"]]),
+  );
+  assert.equal(lines[0].vendorNo, "");
+  const groups = groupByVendorWeek(lines, true);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].lineCount, 1);
+});
+
+test("a vendor with no card falls back to its code, never to a blank", () => {
+  const lines = toVendorLines(
+    [comp()] as never,
+    new Map([["RMC/1", "V9"]]),
+    new Map(),
+    new Map([["OLC1", "2026-08-31"]]),
+  );
+  assert.equal(lines[0].vendorName, "V9");
+});
+
+test("lines group into one row per vendor per week", () => {
+  const groups = groupByVendorWeek(
+    vlines(
+      [
+        comp({ prodOrderNo: "OLC1", itemNo: "RMC/1" }),
+        comp({ prodOrderNo: "OLC2", itemNo: "RMC/2" }),
+        comp({ prodOrderNo: "OLC3", itemNo: "RMC/1" }),
+      ],
+      [
+        ["OLC1", "2026-08-31"],
+        ["OLC2", "2026-09-02"],
+        ["OLC3", "2026-09-07"],
+      ],
+    ),
+    true,
+  );
+  // OLC1 and OLC2 are the same week; OLC3 is the next.
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].weekStart, "2026-08-31");
+  assert.equal(groups[0].lineCount, 2);
+  assert.equal(groups[0].orderCount, 2);
+  assert.equal(groups[0].itemCount, 2);
+  assert.equal(groups[1].weekStart, "2026-09-07");
+});
+
+test("orders and items are counted distinctly, not summed", () => {
+  // Two lines of the same item on the same order is one order and one item,
+  // however many lines it takes.
+  const groups = groupByVendorWeek(
+    vlines([comp({ lineNo: 10000 }), comp({ lineNo: 20000 })], [["OLC1", "2026-08-31"]]),
+    true,
+  );
+  assert.equal(groups[0].lineCount, 2);
+  assert.equal(groups[0].orderCount, 1);
+  assert.equal(groups[0].itemCount, 1);
+});
+
+test("weeks sort earliest first, and undated rows sort last", () => {
+  const groups = groupByVendorWeek(
+    [
+      ...vlines([comp({ prodOrderNo: "OLC2" })], [["OLC2", "2026-09-07"]]),
+      ...vlines([comp({ prodOrderNo: "OLC3", dueDate: null })]),
+      ...vlines([comp({ prodOrderNo: "OLC1" })], [["OLC1", "2026-08-31"]]),
+    ],
+    true,
+  );
+  assert.deepEqual(
+    groups.map((g) => g.weekStart),
+    ["2026-08-31", "2026-09-07", ""],
+  );
+});
+
+test("within a week the biggest commitment leads", () => {
+  // A buyer opens the page to see what to chase, not who sorts first.
+  const lines = [
+    ...toVendorLines(
+      [comp({ prodOrderNo: "A", itemNo: "X" })] as never,
+      new Map([["X", "V-SMALL"]]),
+      new Map([["V-SMALL", "Aardvark Ltd"]]),
+      new Map([["A", "2026-08-31"]]),
+    ),
+    ...toVendorLines(
+      [comp({ prodOrderNo: "B", itemNo: "Y" }), comp({ prodOrderNo: "C", itemNo: "Y" })] as never,
+      new Map([["Y", "V-BIG"]]),
+      new Map([["V-BIG", "Zebra Ltd"]]),
+      new Map([
+        ["B", "2026-08-31"],
+        ["C", "2026-09-01"],
+      ]),
+    ),
+  ];
+  const groups = groupByVendorWeek(lines, true);
+  assert.equal(groups[0].vendorName, "Zebra Ltd");
+  assert.equal(groups[0].lineCount, 2);
+});
+
+test("nothing is called short when the stock feed is partial", () => {
+  const short = vlines([comp({ remainingQuantity: 100, available: 0 })], [["OLC1", "2026-08-31"]]);
+  assert.equal(groupByVendorWeek(short, true)[0].shortLines, 1);
+  assert.equal(groupByVendorWeek(short, false)[0].shortLines, 0);
+});
+
+test("only a short line's delivery date counts as the next delivery", () => {
+  // A covered line has an incoming PO too, and showing its date would read as
+  // waiting on a delivery when nothing is being waited on.
+  const covered = vlines(
+    [comp({ remainingQuantity: 10, available: 500, nextReceipt: "2026-09-01" })],
+    [["OLC1", "2026-08-31"]],
+  );
+  assert.equal(groupByVendorWeek(covered, true)[0].nextReceipt, null);
+});
+
+test("fully picked holds only when every line is", () => {
+  const mixed = vlines(
+    [comp({ completelyPicked: true }), comp({ prodOrderNo: "OLC2", completelyPicked: false })],
+    [
+      ["OLC1", "2026-08-31"],
+      ["OLC2", "2026-09-01"],
+    ],
+  );
+  const group = groupByVendorWeek(mixed, true)[0];
+  assert.equal(group.pickedLines, 1);
+  assert.equal(group.fullyPicked, false);
+});
+
+test("the vendor list totals lines across every week", () => {
+  const groups = groupByVendorWeek(
+    vlines(
+      [comp({ prodOrderNo: "OLC1" }), comp({ prodOrderNo: "OLC2" })],
+      [
+        ["OLC1", "2026-08-31"],
+        ["OLC2", "2026-09-07"],
+      ],
+    ),
+    true,
+  );
+  const list = vendorsIn(groups);
+  assert.equal(list.length, 1);
+  assert.equal(list[0].lines, 2);
+  assert.equal(list[0].name, "Advance Flavour Solutions");
+});
+
+// --- paging through weeks ---------------------------------------------------
+
+test("the week pager opens on the week you are standing in", () => {
+  // ASOF is Sunday 30 August - the LAST day of w35, which starts 24 August.
+  // Landing on w36 because the Monday has passed would skip the week whose
+  // deliveries are still live.
+  const weeks = ["2026-08-10", "2026-08-17", "2026-08-24", "2026-08-31"];
+  assert.equal(initialWeekIndex(weeks, ASOF), 2);
+  assert.equal(weeks[initialWeekIndex(weeks, ASOF)], "2026-08-24");
+});
+
+test("with no current week, the pager opens on the next one with work", () => {
+  // Not the earliest. On the real board that is a single stalled June order,
+  // week 1 of 11, eight clicks from the week anyone came to look at.
+  const weeks = ["2026-06-29", "2026-07-27", "2026-09-07", "2026-09-14"];
+  assert.equal(weeks[initialWeekIndex(weeks, ASOF)], "2026-09-07");
+});
+
+test("when every week is behind, the pager opens on the most recent", () => {
+  const weeks = ["2026-06-29", "2026-07-27", "2026-08-03"];
+  assert.equal(weeks[initialWeekIndex(weeks, ASOF)], "2026-08-03");
+});
+
+test("an undated bucket is never a landing place", () => {
+  // It answers a different question from any real week, and opening on it
+  // would show a page that looks empty of scheduled work.
+  assert.equal(initialWeekIndex(["", "2026-09-07"], ASOF), 1);
+  // Even when it is all there is, the index stays in range.
+  assert.equal(initialWeekIndex([""], ASOF), 0);
+  assert.equal(initialWeekIndex([], ASOF), 0);
+});
+
+test("the week list is every week in the data, undated last", () => {
+  const lines = toVendorLines(
+    [
+      comp({ prodOrderNo: "B" }),
+      comp({ prodOrderNo: "C", dueDate: null }),
+      comp({ prodOrderNo: "A" }),
+      comp({ prodOrderNo: "D" }),
+    ] as never,
+    new Map([["RMC/1", "V1"]]),
+    new Map(),
+    new Map([
+      ["A", "2026-08-31"],
+      ["B", "2026-09-07"],
+      ["D", "2026-08-31"],
+    ]),
+  );
+  // D shares A's week, so three lines make two weeks plus the undated one.
+  assert.deepEqual(weeksIn(lines), ["2026-08-31", "2026-09-07", ""]);
+});
+
+test("a week range writes the year once, and the month only when it changes", () => {
+  assert.equal(formatWeekRange("2026-08-03", "2026-08-09"), "3 - 9 Aug 2026");
+  assert.equal(formatWeekRange("2026-08-31", "2026-09-06"), "31 Aug - 6 Sep 2026");
+  assert.equal(formatWeekRange("2026-12-28", "2027-01-03"), "28 Dec - 3 Jan 2027");
+  assert.equal(formatWeekRange("", ""), "");
+});
+
+// --- items inside a vendor week ---------------------------------------------
+
+/** Lines for one vendor, one week, ready to group by item. */
+function ilines(over: Record<string, unknown>[]) {
+  return toVendorLines(
+    over.map((o) => comp(o)) as never,
+    new Map([
+      ["RMC/1", "V1"],
+      ["RMC/2", "V1"],
+    ]),
+    new Map([["V1", "Advance Flavour Solutions"]]),
+    new Map(),
+  );
+}
+
+test("a vendor week collapses to one row per item, with the quantity summed", () => {
+  // A purchase order has one line per item, not one per production order.
+  const items = groupLinesByItem(
+    ilines([
+      { prodOrderNo: "A", itemNo: "RMC/1", remainingQuantity: 143 },
+      { prodOrderNo: "B", itemNo: "RMC/1", remainingQuantity: 143 },
+      { prodOrderNo: "C", itemNo: "RMC/2", remainingQuantity: 26 },
+    ]),
+    true,
+  );
+  assert.equal(items.length, 2);
+  assert.equal(items[0].itemNo, "RMC/1");
+  assert.equal(items[0].remaining, 286);
+  assert.equal(items[0].orderCount, 2);
+  assert.equal(items[0].lines.length, 2);
+});
+
+test("stock is counted once per item, never summed across its lines", () => {
+  // THE reason to group by item. Every line of an item carries the same free
+  // stock, because it is the item's stock and not the line's share of it.
+  // Four lines at 150 must not report 600 on the shelf.
+  const items = groupLinesByItem(
+    ilines([
+      { prodOrderNo: "A", itemNo: "RMC/1", remainingQuantity: 143, available: 150 },
+      { prodOrderNo: "B", itemNo: "RMC/1", remainingQuantity: 143, available: 150 },
+      { prodOrderNo: "C", itemNo: "RMC/1", remainingQuantity: 143, available: 150 },
+      { prodOrderNo: "D", itemNo: "RMC/1", remainingQuantity: 143, available: 150 },
+    ]),
+    true,
+  );
+  assert.equal(items[0].available, 150);
+  assert.equal(items[0].remaining, 572);
+});
+
+test("shortfall is the week's demand against one pool of stock", () => {
+  // Line by line, each of these four orders sees the same 150 and decides it
+  // is covered, so nothing looks short while the week is 422 down. Compared
+  // once, it is short.
+  const lines = ilines([
+    { prodOrderNo: "A", itemNo: "RMC/1", remainingQuantity: 143, available: 150 },
+    { prodOrderNo: "B", itemNo: "RMC/1", remainingQuantity: 143, available: 150 },
+    { prodOrderNo: "C", itemNo: "RMC/1", remainingQuantity: 143, available: 150 },
+    { prodOrderNo: "D", itemNo: "RMC/1", remainingQuantity: 143, available: 150 },
+  ]);
+  // Not one line is short on its own.
+  assert.equal(lines.filter((l) => l.available < l.remainingQuantity).length, 0);
+  assert.equal(groupLinesByItem(lines, true)[0].shortBy, 422);
+});
+
+test("an item with enough stock is not short, and has no delivery to wait for", () => {
+  const items = groupLinesByItem(
+    ilines([
+      { itemNo: "RMC/1", remainingQuantity: 26, available: 208, nextReceipt: "2026-09-10" },
+    ]),
+    true,
+  );
+  assert.equal(items[0].shortBy, 0);
+  // The item has an incoming PO, but showing its date would read as waiting on
+  // a delivery when nothing is being waited on.
+  assert.equal(items[0].nextReceipt, null);
+});
+
+test("nothing is called short when the stock feed is partial", () => {
+  const lines = ilines([{ itemNo: "RMC/1", remainingQuantity: 500, available: 0 }]);
+  assert.equal(groupLinesByItem(lines, true)[0].shortBy, 500);
+  assert.equal(groupLinesByItem(lines, false)[0].shortBy, 0);
+});
+
+test("short items lead, then the biggest quantity, then item number", () => {
+  const items = groupLinesByItem(
+    ilines([
+      { prodOrderNo: "A", itemNo: "RMC/2", remainingQuantity: 900, available: 9000 },
+      { prodOrderNo: "B", itemNo: "RMC/1", remainingQuantity: 10, available: 0 },
+    ]),
+    true,
+  );
+  // The small short one beats the large covered one - it is what needs acting
+  // on, which is the whole reason a buyer opened the row.
+  assert.deepEqual(items.map((i) => i.itemNo), ["RMC/1", "RMC/2"]);
+});
+
+test("the earliest need across an item's orders is the one shown", () => {
+  const items = groupLinesByItem(
+    ilines([
+      { prodOrderNo: "A", itemNo: "RMC/1", dueDate: "2026-09-04" },
+      { prodOrderNo: "B", itemNo: "RMC/1", dueDate: "2026-09-01" },
+    ]),
+    true,
+  );
+  assert.equal(items[0].earliestNeeded, "2026-09-01");
+});
+
+// --- filtering the week pager by date ---------------------------------------
+
+const WEEKS = [
+  "2026-07-27",
+  "2026-08-03",
+  "2026-08-10",
+  "2026-08-17",
+  "2026-08-24",
+  "2026-08-31",
+  "2026-09-07",
+];
+
+/** The date language, compiled against ASOF - what the box hands over. */
+function pick(expr: string) {
+  const match = parseDateFilter(expr, ASOF);
+  assert.ok(match, `expression did not parse: ${expr}`);
+  return weeksMatching(WEEKS, match!);
+}
+
+test("a week holds seven days, Monday first", () => {
+  assert.deepEqual(daysOf("2026-08-24"), [
+    "2026-08-24", "2026-08-25", "2026-08-26", "2026-08-27",
+    "2026-08-28", "2026-08-29", "2026-08-30",
+  ]);
+  assert.deepEqual(daysOf(""), []);
+});
+
+test("one typed date finds the week containing it, not the week starting on it", () => {
+  // 30 August is a SUNDAY. Matching on the Monday alone would find nothing and
+  // leave the pager empty on a date the user can see work for.
+  assert.deepEqual(pick("300826"), ["2026-08-24"]);
+  // A Monday still works, obviously.
+  assert.deepEqual(pick("240826"), ["2026-08-24"]);
+  // And a Wednesday in the middle.
+  assert.deepEqual(pick("260826"), ["2026-08-24"]);
+});
+
+test("a period filters the pager to every week it touches", () => {
+  // August, so the weeks that straddle both ends come too - they contain
+  // August days and their material is bought in August.
+  assert.deepEqual(pick("cm"), [
+    "2026-07-27", "2026-08-03", "2026-08-10", "2026-08-17", "2026-08-24", "2026-08-31",
+  ]);
+  // The next seven days from Sunday 30 August run to Saturday 6 September,
+  // which is the last day of w36 - so w37 is correctly outside it.
+  assert.deepEqual(pick("cd..cd+7"), ["2026-08-24", "2026-08-31"]);
+});
+
+test("comparisons and unions narrow the weeks too", () => {
+  assert.deepEqual(pick(">=010926"), ["2026-08-31", "2026-09-07"]);
+  assert.deepEqual(pick("cw|cw+1"), ["2026-08-24", "2026-08-31"]);
+});
+
+test("the undated bucket never matches a date filter", () => {
+  // A date filter asks "when", and "no date" is not an answer to it.
+  const match = parseDateFilter("cm", ASOF)!;
+  assert.deepEqual(weeksMatching(["", "2026-08-03"], match), ["2026-08-03"]);
+});
+
+test("the span of the filtered weeks is whole weeks, not the days asked for", () => {
+  // Someone who asked for August is looking at six whole weeks. Reporting
+  // 1-31 August would describe a narrower period than what is on screen.
+  assert.deepEqual(weekSpan(pick("cm")), { from: "2026-07-27", to: "2026-09-06" });
+  assert.deepEqual(weekSpan(["2026-08-24"]), { from: "2026-08-24", to: "2026-08-30" });
+  assert.equal(weekSpan([]), null);
+  assert.equal(weekSpan([""]), null);
+});
+
+// --- units ------------------------------------------------------------------
+
+test("a vendor week in one unit reports that unit", () => {
+  const groups = groupByVendorWeek(
+    vlines(
+      [comp({ prodOrderNo: "A", remainingQuantity: 26, unitOfMeasureCode: "KG" })],
+      [["A", "2026-08-31"]],
+    ),
+    true,
+  );
+  assert.deepEqual(groups[0].units, [{ code: "KG", quantity: 26 }]);
+});
+
+test("a vendor week in two units is split, never added", () => {
+  // The real case: Rule 13 Ltd in w33 is 94,500 EACH plus 1,047 KG, which a
+  // plain sum reported as 95,547 of nothing in particular.
+  const groups = groupByVendorWeek(
+    vlines(
+      [
+        comp({ prodOrderNo: "A", remainingQuantity: 94500, unitOfMeasureCode: "EACH" }),
+        comp({ prodOrderNo: "B", remainingQuantity: 1047, unitOfMeasureCode: "KG" }),
+      ],
+      [["A", "2026-08-31"], ["B", "2026-08-31"]],
+    ),
+    true,
+  );
+  // Biggest first, so the headline figure leads.
+  assert.deepEqual(groups[0].units, [
+    { code: "EACH", quantity: 94500 },
+    { code: "KG", quantity: 1047 },
+  ]);
+  // The sum still exists, because the column has to sort on something.
+  assert.equal(groups[0].remaining, 95547);
+});
+
+// --- compact quantities -----------------------------------------------------
+
+test("kilos become tonnes once there are a thousand of them", () => {
+  assert.equal(compactQuantity(12681.926, "KG"), "12.68 t");
+  assert.equal(compactQuantity(1047, "KG"), "1.05 t");
+  assert.equal(compactQuantity(250000, "KG"), "250 t");
+  // Below a tonne there is nothing to shorten, and the exact figure is more
+  // use than a decimal of it.
+  assert.equal(compactQuantity(926, "KG"), "926 (KG)");
+  assert.equal(compactQuantity(0, "KG"), "0 (KG)");
+});
+
+test("counts take a k or M suffix and keep their own unit", () => {
+  // There is no larger unit of bottle, so EACH stays EACH.
+  assert.equal(compactQuantity(621073, "EACH"), "621k (EACH)");
+  assert.equal(compactQuantity(35248, "EACH"), "35.2k (EACH)");
+  assert.equal(compactQuantity(13899, "EACH"), "13.9k (EACH)");
+  assert.equal(compactQuantity(107865, "EACH"), "108k (EACH)");
+  assert.equal(compactQuantity(288000, "EACH"), "288k (EACH)");
+  assert.equal(compactQuantity(800, "EACH"), "800 (EACH)");
+  assert.equal(compactQuantity(1250000, "EACH"), "1.25M (EACH)");
+  assert.equal(compactQuantity(24500000, "EACH"), "24.5M (EACH)");
+});
+
+test("trailing zeros are dropped, so 12.50 reads as 12.5", () => {
+  assert.equal(compactQuantity(12500, "KG"), "12.5 t");
+  assert.equal(compactQuantity(20000, "KG"), "20 t");
+  assert.equal(compactQuantity(100000, "EACH"), "100k (EACH)");
+});
+
+test("every value reads at about three significant figures", () => {
+  // Which is the point: two weeks that differ enough to matter must not round
+  // to the same string. 621k and 622k stay apart; 621,073 and 621,140 do not,
+  // and that difference does not change a decision.
+  assert.notEqual(compactQuantity(621073, "EACH"), compactQuantity(622000, "EACH"));
+  assert.notEqual(compactQuantity(35248, "EACH"), compactQuantity(35900, "EACH"));
 });

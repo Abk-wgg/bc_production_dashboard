@@ -290,8 +290,25 @@ export type Item = {
   reorderPoint: number;
   safetyStockQuantity: number;
   vendorNo: string;
+  /**
+   * "Purchase" or "Prod. Order". What separates an item with no vendor because
+   * nobody set one from an item with no vendor because we make it ourselves.
+   */
+  replenishmentSystem: string;
   blocked: boolean;
   unitCost: number;
+};
+
+/**
+ * A vendor card - BC table 23.
+ *
+ * Only what a purchasing view needs. The card carries 140-odd fields; a page
+ * that shows who to chase needs the code and the name, and taking more would
+ * put bank details and payment terms into a browser bundle for no reason.
+ */
+export type Vendor = {
+  no: string;
+  name: string;
 };
 
 /**

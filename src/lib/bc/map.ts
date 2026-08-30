@@ -22,6 +22,7 @@ import type {
   SalesLine,
   SalesOrder,
   StockLot,
+  Vendor,
 } from "../types";
 import { pick, toBool, toDate, toNumber, toText, type RawRow } from "./fields";
 import { toStatus } from "../status";
@@ -227,8 +228,21 @@ export function toItem(row: RawRow): Item {
     inventory: toNumber(pick(row, "Inventory")),
     reorderPoint: toNumber(pick(row, "Reorder_Point", "ReorderPoint")),
     safetyStockQuantity: toNumber(pick(row, "Safety_Stock_Quantity", "SafetyStockQuantity")),
-    vendorNo: toText(pick(row, "Vendor_No", "VendorNo")),
+    // "Vendor No." is the spelling in the raw item export; the published page
+    // renames it Vendor_No. Both arrive at different times from different
+    // files, so the mapper takes either.
+    vendorNo: toText(pick(row, "Vendor_No", "VendorNo", "Vendor No.")),
+    replenishmentSystem: toText(
+      pick(row, "Replenishment_System", "ReplenishmentSystem", "Replenishment System"),
+    ),
     blocked: toBool(pick(row, "Blocked")),
     unitCost: toNumber(pick(row, "Unit_Cost", "UnitCost")),
+  };
+}
+
+export function toVendor(row: RawRow): Vendor {
+  return {
+    no: toText(pick(row, "No", "No.", "No_")),
+    name: toText(pick(row, "Name")),
   };
 }

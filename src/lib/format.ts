@@ -54,3 +54,67 @@ export function formatLineNo(lineNo: number): string {
   if (!lineNo) return "";
   return String(lineNo % 10000 === 0 ? lineNo / 10000 : lineNo);
 }
+
+/**
+ * A week as its span, e.g. "31 Aug - 6 Sep 2026".
+ *
+ * The year is written once, and the month only when the week crosses one, so
+ * the heading stays a date range rather than becoming two full dates joined by
+ * a dash. A week inside one month reads "3 - 9 Aug 2026".
+ */
+export function formatWeekRange(monday: string, sunday: string): string {
+  if (!monday || !sunday) return "";
+  const [, m1, d1] = monday.split("-");
+  const [y2, m2, d2] = sunday.split("-");
+  const month1 = MONTHS[Number(m1) - 1];
+  const month2 = MONTHS[Number(m2) - 1];
+  if (!month1 || !month2) return `${formatDate(monday)} - ${formatDate(sunday)}`;
+  const from = m1 === m2 ? `${Number(d1)}` : `${Number(d1)} ${month1}`;
+  return `${from} - ${Number(d2)} ${month2} ${y2}`;
+}
+
+/**
+ * A quantity at a glance: 621,073 EACH -> "621k", 12,681.926 KG -> "12.68 t".
+ *
+ * For SUMMARY figures only. A vendor's weekly total is a magnitude - nobody
+ * orders 621,073 of something in one line - so rounding it costs nothing and
+ * makes a column of six-digit numbers comparable at a glance. The item
+ * quantities in the panel are the ones transcribed onto a purchase order and
+ * stay exact, as do the Excel export and the JSON feed, so nothing that gets
+ * acted on or reconciled against BC is ever a rounded figure.
+ *
+ * Kilos become tonnes because that is how a tonne is talked about; everything
+ * else keeps its own unit and takes a k/M suffix, because "621k bottles" is a
+ * count and there is no larger unit of bottle.
+ *
+ * Precision shrinks as the number grows, so every value reads at about three
+ * significant figures: 13.9k, 108k, 1.25M. Two weeks that differ enough to
+ * matter never round to the same string.
+ */
+export function compactQuantity(quantity: number, unit: string): string {
+  const sign = quantity < 0 ? "-" : "";
+  const value = Math.abs(quantity);
+
+  // Below a thousand there is nothing to shorten, and the exact figure is
+  // more use than a decimal of it.
+  if (value < 1000) return `${sign}${formatNumber(quantity)} (${unit})`;
+
+  if (/^kgs?$/i.test(unit.trim())) {
+    const tonnes = value / 1000;
+    return `${sign}${trim(tonnes, tonnes < 100 ? 2 : tonnes < 1000 ? 1 : 0)} t`;
+  }
+
+  if (value >= 1_000_000) {
+    const millions = value / 1_000_000;
+    return `${sign}${trim(millions, millions < 10 ? 2 : 1)}M (${unit})`;
+  }
+
+  const thousands = value / 1000;
+  return `${sign}${trim(thousands, thousands < 100 ? 1 : 0)}k (${unit})`;
+}
+
+/** Fixed decimals with trailing zeros dropped - 12.50 reads better as 12.5. */
+function trim(value: number, places: number): string {
+  const fixed = value.toFixed(places);
+  return places === 0 ? fixed : fixed.replace(/\.?0+$/, "");
+}

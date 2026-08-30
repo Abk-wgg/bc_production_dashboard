@@ -7,6 +7,7 @@ const LINKS = [
   { href: "/", label: "Production orders", className: "to-orders" },
   { href: "/components", label: "Component list", className: "to-components" },
   { href: "/schedule", label: "Schedule", className: "to-schedule" },
+  { href: "/vendors", label: "By vendor", className: "to-vendors" },
 ];
 
 export default function Nav() {

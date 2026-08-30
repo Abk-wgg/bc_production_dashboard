@@ -20,6 +20,7 @@
 
 import "server-only";
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, join } from "node:path";
 import * as XLSX from "xlsx";
 import type { ServiceKey } from "./client";
 import type { RawRow } from "./fields";
@@ -35,6 +36,25 @@ function feedFile(): string {
 /** Sales_order_Despatch_board.xlsx - richer sales orders and lines. */
 function salesFile(): string {
   return process.env.BC_SALES_WORKBOOK_FILE || "";
+}
+
+/**
+ * Vendor card.xlsx - the supplier names.
+ *
+ * Defaults to the raw-files folder beside the feed, which is where the refresh
+ * already puts it, so the names appear without anyone adding a setting. Set
+ * BC_VENDOR_WORKBOOK_FILE to point somewhere else.
+ */
+function vendorFile(): string {
+  const explicit = process.env.BC_VENDOR_WORKBOOK_FILE;
+  if (explicit) return explicit;
+  const feed = feedFile();
+  if (!feed) return "";
+  // dirname, not a hand-rolled regex. The configured path is a Windows one and
+  // arrives with backslashes; a character class that only knew about forward
+  // slashes silently returned the whole path including the filename, and the
+  // vendor names quietly stayed as codes.
+  return join(dirname(feed), "raw files", "Vendor card.xlsx");
 }
 
 /**
@@ -67,6 +87,8 @@ function sheetsFor(key: ServiceKey): SheetRef[] {
       ];
     case "salesLines":
       return [{ file: sales, sheet: "LinesRaw" }];
+    case "vendors":
+      return [{ file: vendorFile(), sheet: "vendor_card" }];
   }
 }
 
@@ -121,7 +143,7 @@ function readWorkbook(file: string): Map<string, RawRow[]> {
 
 /** Is at least one workbook configured and present on disk? */
 export function hasWorkbook(): boolean {
-  return [feedFile(), salesFile()].some((f) => f && existsSync(f));
+  return [feedFile(), salesFile(), vendorFile()].some((f) => f && existsSync(f));
 }
 
 export type WorkbookRows = { rows: RawRow[]; refreshedAt: string };

@@ -13,3 +13,17 @@ export async function getItems(): Promise<Fetched<Item>> {
   const result = await fetchService("items");
   return { ...result, rows: result.rows.map(toItem) };
 }
+
+/**
+ * Item No. to Vendor No., skipping items with no vendor set.
+ *
+ * An absent key and an empty value would mean the same thing to every caller,
+ * so only real links go in. 7,396 of 10,354 items carry one.
+ */
+export function buildItemVendorMap(items: Item[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const item of items) {
+    if (item.vendorNo) map.set(item.no, item.vendorNo);
+  }
+  return map;
+}
