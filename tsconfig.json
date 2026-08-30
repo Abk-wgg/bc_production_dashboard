@@ -10,6 +10,9 @@
     "module": "esnext",
     "moduleResolution": "bundler",
     "resolveJsonModule": true,
+    // The tests import "../src/lib/x.ts" so Node can run them without a build
+    // step. Safe with noEmit - nothing here is compiled to JS.
+    "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,

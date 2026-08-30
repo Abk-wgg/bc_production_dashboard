@@ -1,8 +1,23 @@
 import OrdersTable from "@/components/orders-table";
 import NotConfigured from "@/components/not-configured";
+import Tiles from "@/components/tiles";
+import { SourceStamp, SnapshotNotice } from "@/components/source-label";
 import { getProductionOrders } from "@/lib/bc/orders";
+import { getProdOrderComponents } from "@/lib/bc/components";
 import { getProdOrderRoutingLines } from "@/lib/bc/routing";
-import { withWorkCenters } from "@/lib/work-center";
+import { getOutputEvents } from "@/lib/bc/output";
+import { getSalesOrders } from "@/lib/bc/sales";
+import { getStock } from "@/lib/bc/inventory";
+import { getOpenPurchaseLines } from "@/lib/bc/purchasing";
+import {
+  buildIncomingMap,
+  buildProgressMap,
+  buildSalesOrderMap,
+  buildStockMap,
+} from "@/lib/chain";
+import { buildFloorMap, countFloorStates, NOT_ON_THE_LINE } from "@/lib/floor";
+import type { BoardComponent, BoardOrder } from "@/lib/types";
+import { withWorkCenters, buildWorkCenterMap } from "@/lib/work-center";
 import { summarise, today } from "@/lib/board";
 import { formatNumber } from "@/lib/format";
 
@@ -11,15 +26,65 @@ import { formatNumber } from "@/lib/format";
 export const dynamic = "force-dynamic";
 
 export default async function OrdersPage() {
-  // Both feeds are independent, so ask for them at once rather than in series.
-  const [orders, routing] = await Promise.all([
+  // Every feed is independent, so ask for them at once rather than in series.
+  const [orders, routing, components, output, sales, stock, purchases] = await Promise.all([
     getProductionOrders(),
     getProdOrderRoutingLines(),
+    getProdOrderComponents(),
+    getOutputEvents(),
+    getSalesOrders(),
+    getStock(),
+    getOpenPurchaseLines(),
   ]);
 
   const asOf = today();
-  const rows = withWorkCenters(orders.rows, routing.rows);
+  const progress = buildProgressMap(output.rows);
+  const floor = buildFloorMap(output.rows);
+  const salesOrders = buildSalesOrderMap(sales.rows);
+
+  const rows: BoardOrder[] = withWorkCenters(orders.rows, routing.rows).map((order) => {
+    const made = progress.get(order.no);
+    const salesOrder = salesOrders.get(order.salesOrderNo);
+    return {
+      ...order,
+      made: made?.made ?? 0,
+      scrapped: made?.scrapped ?? 0,
+      lastBookedAt: made?.lastBookedAt ?? null,
+      floor: floor.get(order.no) ?? NOT_ON_THE_LINE,
+      customerName: salesOrder?.customerName ?? "",
+      salesShipmentDate: salesOrder?.shipmentDate ?? null,
+    };
+  });
+
+  // The panel under each row needs the same joined component rows the
+  // components page shows, so build them the same way and group by order.
+  const workCenters = buildWorkCenterMap(routing.rows);
+  const stockByItem = buildStockMap(stock.rows);
+  const incomingByItem = buildIncomingMap(purchases.rows);
+  const onBoard = new Set(orders.rows.map((o) => o.no));
+
+  // A plain object, not a Map - Maps do not survive the server/client boundary.
+  const componentsByOrder: Record<string, BoardComponent[]> = {};
+  for (const component of components.rows) {
+    if (!onBoard.has(component.prodOrderNo)) continue;
+    const held = stockByItem.get(component.itemNo);
+    const coming = incomingByItem.get(component.itemNo);
+    (componentsByOrder[component.prodOrderNo] ??= []).push({
+      ...component,
+      workCenter: workCenters.get(component.prodOrderNo) ?? "",
+      available: held?.available ?? 0,
+      earliestExpiry: held?.earliestExpiry ?? null,
+      onOrder: coming?.outstanding ?? 0,
+      nextReceipt: coming?.nextReceipt ?? null,
+    });
+  }
+
   const summary = summarise(orders.rows, asOf);
+  const onTheFloor = countFloorStates(
+    orders.rows.map((o) => o.no),
+    floor,
+  );
+  const running = onTheFloor.running + onTheFloor.paused + onTheFloor["qa-booked"];
 
   return (
     <main className="page-orders">
@@ -27,22 +92,47 @@ export default async function OrdersPage() {
         <div>
           <h1>Production orders</h1>
           <p className="sub">
-            {summary.outstanding} outstanding · {summary.overdue} overdue ·{" "}
-            {summary.dueSoon} due within 7 days · {formatNumber(summary.outstandingUnits)} units
-            to make
+            Released orders at the PRODUCTION location, on their planned dates, with what
+            has actually been made. Click any order to open its components.
           </p>
         </div>
-        <p className="stamp">
-          {orders.source === "business-central"
-            ? `Business Central · ${new Date(orders.fetchedAt).toLocaleTimeString("en-GB")}`
-            : "Not connected"}
-        </p>
+        <SourceStamp result={orders} />
       </div>
 
       {orders.source === "not-configured" ? (
         <NotConfigured what="Production orders" missing={orders.missing} />
       ) : (
         <>
+          <SnapshotNotice result={orders} />
+
+          <Tiles
+            tiles={[
+              {
+                label: "Outstanding",
+                value: summary.outstanding,
+                suffix: `of ${summary.total}`,
+                note: `${formatNumber(summary.outstandingUnits)} units still to make`,
+              },
+              {
+                label: "Behind plan",
+                value: summary.behindPlan,
+                tone: summary.behindPlan > 0 ? "crit" : undefined,
+                note: "Past the date the plan has them finishing",
+              },
+              {
+                label: "Starting within 7 days",
+                value: summary.startingSoon,
+                tone: summary.startingSoon > 0 ? "warn" : undefined,
+                note: "Planned to start, not yet late",
+              },
+              {
+                label: "On the line",
+                value: running,
+                tone: running > 0 ? "good" : undefined,
+                note: `${onTheFloor.running} running · ${onTheFloor.paused} paused · ${onTheFloor["qa-booked"]} QA booked`,
+              },
+            ]}
+          />
           {routing.source === "not-configured" && (
             <div className="notice">
               <h2>Work centres unavailable</h2>
@@ -52,7 +142,12 @@ export default async function OrdersPage() {
               </p>
             </div>
           )}
-          <OrdersTable orders={rows} asOf={asOf} />
+          <OrdersTable
+            orders={rows}
+            componentsByOrder={componentsByOrder}
+            stockKnown={!stock.partial}
+            asOf={asOf}
+          />
         </>
       )}
     </main>

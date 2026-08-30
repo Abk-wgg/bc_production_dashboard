@@ -47,13 +47,53 @@ export function buildWorkCenterMap(lines: ProdOrderRoutingLine[]): Map<string, s
   return map;
 }
 
-/** Attaches the derived work centre to each order. */
+/**
+ * Prod. Order No. -> earliest routing-line Starting Date.
+ *
+ * This is when the work is planned to run. The order header carries a due date,
+ * which is when it is owed - a different question, and the wrong one to build a
+ * schedule around.
+ *
+ * PRINTING is skipped here for the same reason it is skipped above: an order
+ * whose only operation is printing has no work centre, so it has no place on
+ * the board either, and should not be given a start date that implies it does.
+ */
+export function buildScheduledStartMap(
+  lines: ProdOrderRoutingLine[],
+): Map<string, string> {
+  const earliest = new Map<string, string>();
+
+  for (const line of lines) {
+    const order = line.prodOrderNo;
+    const centre = line.no;
+    if (!order || !centre || !line.startingDate) continue;
+
+    const isPrinting =
+      centre.toUpperCase() === EXCLUDED_WORK_CENTER ||
+      line.workCenterNo.toUpperCase() === EXCLUDED_WORK_CENTER;
+    if (isPrinting) continue;
+
+    const current = earliest.get(order);
+    // ISO dates compare correctly as plain strings.
+    if (!current || line.startingDate < current) earliest.set(order, line.startingDate);
+  }
+
+  return earliest;
+}
+
+/** Attaches the work centre and scheduled start date to each order. */
 export function withWorkCenters(
   orders: ProductionOrder[],
   lines: ProdOrderRoutingLine[],
 ): OrderWithWorkCenter[] {
-  const map = buildWorkCenterMap(lines);
-  return orders.map((order) => ({ ...order, workCenter: map.get(order.no) ?? "" }));
+  const centres = buildWorkCenterMap(lines);
+  const starts = buildScheduledStartMap(lines);
+
+  return orders.map((order) => ({
+    ...order,
+    workCenter: centres.get(order.no) ?? "",
+    scheduledStart: starts.get(order.no) ?? null,
+  }));
 }
 
 export type WorkCenterCategory = "production" | "trade" | "unassigned";

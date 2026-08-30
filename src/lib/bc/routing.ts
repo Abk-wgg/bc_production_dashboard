@@ -11,38 +11,9 @@
 // Read from the published web service `Prod_Order_Routing_Excel`.
 
 import "server-only";
-import { fetchService, type RawRow } from "./client";
+import { fetchService } from "./client";
+import { toRoutingLine } from "./map";
 import type { Fetched, ProdOrderRoutingLine } from "../types";
-import { pick, toBool, toDate, toNumber, toText } from "./fields";
-import { toStatus } from "../status";
-
-function toRoutingLine(row: RawRow): ProdOrderRoutingLine {
-  return {
-    prodOrderNo: toText(pick(row, "Prod_Order_No", "ProdOrderNo", "Prod. Order No.")),
-    status: toStatus(pick(row, "Status")),
-    routingNo: toText(pick(row, "Routing_No", "RoutingNo")),
-    operationNo: toText(pick(row, "Operation_No", "OperationNo")),
-    nextOperationNo: toText(pick(row, "Next_Operation_No", "NextOperationNo")),
-    type: toText(pick(row, "Type")),
-    no: toText(pick(row, "No", "No.", "No_")),
-    workCenterNo: toText(pick(row, "Work_Center_No", "WorkCenterNo")),
-    workCenterGroupCode: toText(pick(row, "Work_Center_Group_Code", "WorkCenterGroupCode")),
-    description: toText(pick(row, "Description")),
-    setupTime: toNumber(pick(row, "Setup_Time", "SetupTime")),
-    runTime: toNumber(pick(row, "Run_Time", "RunTime")),
-    expectedCapacityNeed: toNumber(pick(row, "Expected_Capacity_Need", "ExpectedCapacityNeed")),
-    routingStatus: toText(pick(row, "Routing_Status", "RoutingStatus")),
-    startingDate: toDate(pick(row, "Starting_Date", "StartingDate")),
-    endingDate: toDate(pick(row, "Ending_Date", "EndingDate")),
-    locationCode: toText(pick(row, "Location_Code", "LocationCode")),
-    scheduled: toBool(pick(row, "NETVAPS_Scheduled", "NETVAPSScheduled", "Scheduled_by_VAPS")),
-    earliestStartDate: toDate(
-      pick(row, "NETVAPS_Earliest_Start_Date", "NETVAPSEarliestStartDate", "Earliest_Start_Date"),
-    ),
-    emad: toDate(pick(row, "NETVAPS_EMAD", "NETVAPSEMAD", "Earliest_Material_Availability_Date")),
-    notFullyPromised: toBool(pick(row, "NETVAPS_Not_Fully_Promised", "NETVAPSNotFullyPromised")),
-  };
-}
 
 export async function getProdOrderRoutingLines(): Promise<Fetched<ProdOrderRoutingLine>> {
   const result = await fetchService("prodOrderRouting");

@@ -26,6 +26,25 @@ export function formatDayHeading(iso: string): string {
   return `${day} ${formatDate(iso)}`;
 }
 
+/**
+ * "2026-08-28T06:20:12.66Z" -> "28 Aug 06:20".
+ *
+ * Rendered from the UTC parts, not through a Date. A Date would be shown in
+ * whatever timezone each end is set to, which shifts the clock by an hour in
+ * British Summer Time and makes the server and the browser disagree - a
+ * hydration mismatch. The picking control board shows the UTC time too, so the
+ * two screens read the same.
+ */
+export function formatDateTime(iso: string | null): string {
+  if (!iso) return "";
+  const [date, rest] = iso.split("T");
+  if (!rest) return formatDate(date);
+  const [y, m, d] = date.split("-");
+  const month = MONTHS[Number(m) - 1];
+  if (!month) return iso;
+  return `${Number(d)} ${month} ${rest.slice(0, 5)}`;
+}
+
 export function formatNumber(n: number): string {
   return n.toLocaleString("en-GB");
 }

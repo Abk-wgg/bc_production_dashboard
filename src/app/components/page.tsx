@@ -1,9 +1,14 @@
 import ComponentsTable from "@/components/components-table";
 import NotConfigured from "@/components/not-configured";
+import { SourceStamp, SnapshotNotice } from "@/components/source-label";
 import { getProdOrderComponents } from "@/lib/bc/components";
+import { getProductionOrders } from "@/lib/bc/orders";
 import { getProdOrderRoutingLines } from "@/lib/bc/routing";
 import { buildWorkCenterMap } from "@/lib/work-center";
-import type { ComponentWithWorkCenter } from "@/lib/types";
+import { getStock } from "@/lib/bc/inventory";
+import { getOpenPurchaseLines } from "@/lib/bc/purchasing";
+import { buildIncomingMap, buildStockMap } from "@/lib/chain";
+import type { BoardComponent } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -12,19 +17,45 @@ export default async function ComponentsPage({
 }: {
   searchParams: Promise<{ order?: string }>;
 }) {
-  const [{ order }, components, routing] = await Promise.all([
+  const [{ order }, components, routing, orders, stock, purchases] = await Promise.all([
     searchParams,
     getProdOrderComponents(),
     getProdOrderRoutingLines(),
+    getProductionOrders(),
+    getStock(),
+    getOpenPurchaseLines(),
   ]);
 
   // Components carry no work centre of their own - it belongs to the parent
   // order's routing, so borrow it from there.
   const workCenters = buildWorkCenterMap(routing.rows);
-  const rows: ComponentWithWorkCenter[] = components.rows.map((component) => ({
-    ...component,
-    workCenter: workCenters.get(component.prodOrderNo) ?? "",
-  }));
+
+  // Orders are already narrowed to the PRODUCTION location, so use them to
+  // decide which components belong on the board. Filtering by the component's
+  // own location code would not be the same thing - a component can be held at
+  // a different location from the order that consumes it.
+  const onBoard = new Set(orders.rows.map((o) => o.no));
+
+  // Stock and incoming supply are matched by ITEM. Purchase lines carry a
+  // `Prod. Order No.` field, but it is empty on every row, so there is no way
+  // to say which order a delivery is earmarked for.
+  const stockByItem = buildStockMap(stock.rows);
+  const incomingByItem = buildIncomingMap(purchases.rows);
+
+  const rows: BoardComponent[] = components.rows
+    .filter((component) => onBoard.has(component.prodOrderNo))
+    .map((component) => {
+      const held = stockByItem.get(component.itemNo);
+      const coming = incomingByItem.get(component.itemNo);
+      return {
+        ...component,
+        workCenter: workCenters.get(component.prodOrderNo) ?? "",
+        available: held?.available ?? 0,
+        earliestExpiry: held?.earliestExpiry ?? null,
+        onOrder: coming?.outstanding ?? 0,
+        nextReceipt: coming?.nextReceipt ?? null,
+      };
+    });
 
   return (
     <main className="page-components">
@@ -33,17 +64,31 @@ export default async function ComponentsPage({
           <h1>Component list</h1>
           <p className="sub">Materials on each production order, with warehouse pick state</p>
         </div>
-        <p className="stamp">
-          {components.source === "business-central"
-            ? `Business Central · ${new Date(components.fetchedAt).toLocaleTimeString("en-GB")}`
-            : "Not connected"}
-        </p>
+        <SourceStamp result={components} />
       </div>
 
       {components.source === "not-configured" ? (
         <NotConfigured what="Prod. order components" missing={components.missing} />
       ) : (
-        <ComponentsTable components={rows} initialOrder={order ?? ""} />
+        <>
+          <SnapshotNotice result={components} />
+          {stock.partial && (
+            <div className="notice">
+              <h2>Stock figures are incomplete</h2>
+              <p>
+                The snapshot holds only part of the stock table, so an item with no row
+                is not necessarily out of stock. <strong>Short By is hidden</strong>
+                rather than reported wrongly — it returns as soon as the app reads
+                Business Central live.
+              </p>
+            </div>
+          )}
+          <ComponentsTable
+            components={rows}
+            initialOrder={order ?? ""}
+            stockKnown={!stock.partial}
+          />
+        </>
       )}
     </main>
   );

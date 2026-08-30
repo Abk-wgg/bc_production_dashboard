@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { Fragment, useMemo, useState, type ReactNode } from "react";
 
 export type Column<T> = {
   key: string;
@@ -32,6 +32,8 @@ export default function DataTable<T>({
   exportName,
   toolbar,
   emptyMessage = "No rows.",
+  expand,
+  defaultSort = null,
 }: {
   rows: T[];
   columns: Column<T>[];
@@ -41,10 +43,21 @@ export default function DataTable<T>({
   /** Page-specific controls, shown to the left of the search box. */
   toolbar?: ReactNode;
   emptyMessage?: string;
+  /**
+   * Detail panel for a row. Supplying it makes every row expandable: a caret
+   * appears at the left and clicking anywhere in the row opens the panel
+   * underneath. Left out, the table behaves exactly as before.
+   */
+  expand?: (row: T) => ReactNode;
+  /** Sort applied before the user touches a header. */
+  defaultSort?: SortState | null;
 }) {
   const [filter, setFilter] = useState("");
   const [columnFilters, setColumnFilters] = useState<Record<string, string>>({});
-  const [sort, setSort] = useState<SortState | null>(null);
+  const [sort, setSort] = useState<SortState | null>(defaultSort);
+  // Keyed on the row key, not the index, so sorting or filtering the table
+  // does not move the open panel onto a different order.
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
 
   const filtered = useMemo(() => {
     const query = filter.trim().toLowerCase();
@@ -107,6 +120,14 @@ export default function DataTable<T>({
     XLSX.writeFile(book, `${exportName}-${new Date().toISOString().slice(0, 10)}.xlsx`);
   }
 
+  function toggleRow(key: string) {
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(key)) next.add(key);
+      return next;
+    });
+  }
+
   const hasColumnFilters = Object.values(columnFilters).some((v) => v.trim() !== "");
 
   return (
@@ -148,6 +169,7 @@ export default function DataTable<T>({
           <table>
             <thead>
               <tr>
+                {expand && <th className="exp" scope="col" aria-label="Expand" />}
                 {columns.map((column) => {
                   const active = sort?.key === column.key;
                   return (
@@ -168,6 +190,7 @@ export default function DataTable<T>({
                 })}
               </tr>
               <tr>
+                {expand && <th className="exp" />}
                 {columns.map((column) => (
                   <th key={column.key}>
                     <input
@@ -184,24 +207,59 @@ export default function DataTable<T>({
               </tr>
             </thead>
             <tbody>
-              {sorted.map((row, index) => (
-                <tr key={rowKey(row, index)}>
-                  {columns.map((column) => (
-                    <td
-                      key={column.key}
-                      className={[
-                        column.numeric ? "num" : "",
-                        column.wrap ? "wrap" : "",
-                        column.nowrap ? "nowrap" : "",
-                      ]
-                        .filter(Boolean)
-                        .join(" ")}
+              {sorted.map((row, index) => {
+                const key = rowKey(row, index);
+                const isOpen = open.has(key);
+                const cells = columns.map((column) => (
+                  <td
+                    key={column.key}
+                    className={[
+                      column.numeric ? "num" : "",
+                      column.wrap ? "wrap" : "",
+                      column.nowrap ? "nowrap" : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    {column.render ? column.render(row) : column.cell(row)}
+                  </td>
+                ));
+
+                if (!expand) return <tr key={key}>{cells}</tr>;
+
+                return (
+                  <Fragment key={key}>
+                    <tr
+                      className={isOpen ? "ord open" : "ord"}
+                      tabIndex={0}
+                      role="button"
+                      aria-expanded={isOpen}
+                      onClick={(e) => {
+                        // A link or a button inside the row does its own job.
+                        // Swallowing that click would make the cell look broken.
+                        if ((e.target as HTMLElement).closest("a, button, input")) return;
+                        toggleRow(key);
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget) return;
+                        if (e.key !== "Enter" && e.key !== " ") return;
+                        e.preventDefault();
+                        toggleRow(key);
+                      }}
                     >
-                      {column.render ? column.render(row) : column.cell(row)}
-                    </td>
-                  ))}
-                </tr>
-              ))}
+                      <td className="exp">
+                        <span className="caret">{isOpen ? "▼" : "▶"}</span>
+                      </td>
+                      {cells}
+                    </tr>
+                    {isOpen && (
+                      <tr className="det">
+                        <td colSpan={columns.length + 1}>{expand(row)}</td>
+                      </tr>
+                    )}
+                  </Fragment>
+                );
+              })}
             </tbody>
           </table>
         </div>

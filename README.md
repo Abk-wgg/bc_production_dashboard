@@ -100,7 +100,14 @@ Entra registration exists.
 
 ## Access
 
-**There is none yet.** Anyone who can reach the URL can read the board. Network
-reachability is not access control, and this is the main outstanding gap. The
-intended fix is Entra sign-in via Auth.js, which needs an app registration but
-no Azure subscription.
+Everything requires a **Microsoft work account** in our tenant. Auth.js handles
+the sign-in; the check runs in `src/middleware.ts`, so a new page is protected
+the moment it is added rather than when someone remembers to guard it.
+
+Signing in proves who someone is. It gives them **no** Business Central access
+and does not consult their BC permissions — the app still reads BC as one
+service identity, so **viewers need no BC licence**. That separation is the
+point of the whole design.
+
+There are no roles yet: everyone signed in sees the same board.
+`AUTH-SETUP.md` has the app registration steps and how to tighten it later.

@@ -9,20 +9,31 @@ import {
   type WorkCenterCategory,
 } from "./work-center";
 
-export const NO_DATE = "no-date";
+export const NO_DATE = "not-scheduled";
 
-export type DayGroup = {
-  /** The due date as YYYY-MM-DD, or NO_DATE for orders with no due date. */
+export type DayGroup<T extends OrderWithWorkCenter = OrderWithWorkCenter> = {
+  /**
+   * The scheduled start date as YYYY-MM-DD, or NO_DATE for orders with no
+   * routing line to take one from.
+   */
   key: string;
-  orders: OrderWithWorkCenter[];
+  orders: T[];
 };
 
-/** Group by due date, earliest first, with undated orders last. */
-export function groupByDay(orders: OrderWithWorkCenter[]): DayGroup[] {
-  const byDay = new Map<string, OrderWithWorkCenter[]>();
+/**
+ * Group by the day the work is scheduled to START, earliest first, with
+ * unscheduled orders last.
+ *
+ * Deliberately not the due date. A schedule answers "what runs today"; the due
+ * date answers "what is owed today". Grouping by due date puts a job that runs
+ * next week in whatever month it happens to be promised for, which is not where
+ * anyone looks for it. The due date is still shown on every card.
+ */
+export function groupByDay<T extends OrderWithWorkCenter>(orders: T[]): DayGroup<T>[] {
+  const byDay = new Map<string, T[]>();
 
   for (const order of orders) {
-    const key = order.dueDate ?? NO_DATE;
+    const key = order.scheduledStart ?? NO_DATE;
     if (!byDay.has(key)) byDay.set(key, []);
     byDay.get(key)!.push(order);
   }
@@ -36,10 +47,10 @@ export function groupByDay(orders: OrderWithWorkCenter[]): DayGroup[] {
     });
 }
 
-export type WorkCenterColumn = {
+export type WorkCenterColumn<T extends OrderWithWorkCenter = OrderWithWorkCenter> = {
   workCenter: string;
   category: WorkCenterCategory;
-  orders: OrderWithWorkCenter[];
+  orders: T[];
 };
 
 // Production centres first, then bought-in/trade, then anything with no
@@ -56,11 +67,11 @@ const CATEGORY_ORDER: Record<WorkCenterCategory, number> = {
  * centres appears in both - it genuinely needs both, and hiding it from one
  * would misrepresent that centre's day.
  */
-export function toWorkCenterColumns(
-  orders: OrderWithWorkCenter[],
+export function toWorkCenterColumns<T extends OrderWithWorkCenter>(
+  orders: T[],
   category: Exclude<WorkCenterCategory, "unassigned"> | null,
-): WorkCenterColumn[] {
-  const byCentre = new Map<string, OrderWithWorkCenter[]>();
+): WorkCenterColumn<T>[] {
+  const byCentre = new Map<string, T[]>();
 
   for (const order of orders) {
     const centres = splitWorkCenters(order.workCenter);
@@ -86,7 +97,7 @@ export function toWorkCenterColumns(
 }
 
 /** Distinct location codes present, sorted - drives the colour assignment. */
-export function locationsIn(orders: OrderWithWorkCenter[]): string[] {
+export function locationsIn(orders: Pick<OrderWithWorkCenter, "locationCode">[]): string[] {
   const set = new Set<string>();
   for (const order of orders) {
     if (order.locationCode) set.add(order.locationCode);

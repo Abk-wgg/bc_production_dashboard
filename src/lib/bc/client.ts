@@ -13,10 +13,12 @@
 // ---------------------------------------------------------------------------
 
 import "server-only";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import type { Fetched } from "../types";
+import type { RawRow } from "./fields";
 
-/** A row exactly as BC sent it, before any field mapping. */
-export type RawRow = Record<string, unknown>;
+export type { RawRow } from "./fields";
 
 export type { Fetched, Source } from "../types";
 
@@ -24,12 +26,24 @@ export type { Fetched, Source } from "../types";
 export type ServiceKey =
   | "productionOrders"
   | "prodOrderComponents"
-  | "prodOrderRouting";
+  | "prodOrderRouting"
+  | "outputEvents"
+  | "inventory"
+  | "purchaseLines"
+  | "salesOrders"
+  | "salesLines"
+  | "items";
 
 const SERVICE_ENV: Record<ServiceKey, string> = {
   productionOrders: "BC_WS_PRODUCTION_ORDERS",
   prodOrderComponents: "BC_WS_PROD_ORDER_COMPONENTS",
   prodOrderRouting: "BC_WS_PROD_ORDER_ROUTING",
+  outputEvents: "BC_WS_OUTPUT_EVENTS",
+  inventory: "BC_WS_INVENTORY",
+  purchaseLines: "BC_WS_PURCHASE_LINES",
+  salesOrders: "BC_WS_SALES_ORDERS",
+  salesLines: "BC_WS_SALES_LINES",
+  items: "BC_WS_ITEMS",
 };
 
 // Services already published on the Production environment's Web Services
@@ -40,6 +54,15 @@ const SERVICE_DEFAULT: Record<ServiceKey, string> = {
   productionOrders: "Production_Order_List_Excel",
   prodOrderComponents: "prod_order_comp_with_pick",
   prodOrderRouting: "Prod_Order_Routing_Excel",
+  outputEvents: "Prod_Order_Data_Entry_Excel",
+  inventory: "Inventory_Summary_Excel",
+  // `CS_PurchaseLine` is an alternative service over the same table 39. Both
+  // work with the mapper; set BC_WS_PURCHASE_LINES to swap if one turns out to
+  // expose fields the other does not.
+  purchaseLines: "Purchase_Order_Line_Excel",
+  salesOrders: "sale_order_list_custom_ab",
+  salesLines: "Sales_Lines_Excel",
+  items: "Item_Card_Excel",
 };
 
 
@@ -65,6 +88,54 @@ export function serviceEnvVar(key: ServiceKey): string {
 
 export function isConfigured(key: ServiceKey): boolean {
   return hasCredentials() && serviceName(key).length > 0;
+}
+
+// --- snapshot ---------------------------------------------------------------
+//
+// Real BC rows captured to a file so the board can be demonstrated before the
+// Entra app registration exists. Field names in it are already in published
+// web-service form, so a snapshot goes through exactly the same mappers as live
+// data - what you see in a demo is what you will see live.
+//
+// Live credentials always win. The snapshot is only consulted when there are
+// none, so it can never silently mask a broken connection.
+
+type Snapshot = {
+  takenAt: string;
+  /** Names of the feeds the capture could not complete. */
+  partial?: string[];
+  productionOrders?: RawRow[];
+  prodOrderComponents?: RawRow[];
+  prodOrderRouting?: RawRow[];
+  outputEvents?: RawRow[];
+  inventory?: RawRow[];
+  purchaseLines?: RawRow[];
+  salesOrders?: RawRow[];
+  salesLines?: RawRow[];
+  items?: RawRow[];
+};
+
+// undefined = not looked yet, null = looked and there is none.
+let snapshotCache: Snapshot | null | undefined;
+
+function loadSnapshot(): Snapshot | null {
+  if (snapshotCache !== undefined) return snapshotCache;
+
+  const file =
+    process.env.BC_SNAPSHOT_FILE ?? path.join(process.cwd(), "data-snapshot.json");
+
+  try {
+    snapshotCache = existsSync(file)
+      ? (JSON.parse(readFileSync(file, "utf8")) as Snapshot)
+      : null;
+  } catch (error) {
+    // A corrupt snapshot should not take the board down - fall through to the
+    // "not configured" state, which at least says something useful.
+    console.error(`Could not read snapshot at ${file}:`, error);
+    snapshotCache = null;
+  }
+
+  return snapshotCache;
 }
 
 // --- token ------------------------------------------------------------------
@@ -148,6 +219,18 @@ export async function fetchService(
   const fetchedAt = new Date().toISOString();
 
   if (!isConfigured(key)) {
+    const snapshot = loadSnapshot();
+    const rows = snapshot?.[key];
+    if (rows) {
+      return {
+        source: "snapshot",
+        fetchedAt,
+        takenAt: snapshot.takenAt,
+        partial: snapshot.partial?.includes(key) ?? false,
+        rows,
+      };
+    }
+
     return {
       source: "not-configured",
       missing: hasCredentials() ? serviceEnvVar(key) : "BC_CLIENT_ID / BC_CLIENT_SECRET",

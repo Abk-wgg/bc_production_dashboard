@@ -8,7 +8,8 @@
 //
 // Pure functions, no BC access - safe to unit test and to import anywhere.
 
-import type { RawRow } from "./client";
+/** A row exactly as BC sent it, before any field mapping. */
+export type RawRow = Record<string, unknown>;
 
 export function pick(row: RawRow, ...keys: string[]): unknown {
   for (const key of keys) {

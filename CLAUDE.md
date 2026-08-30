@@ -26,6 +26,8 @@ The constraints are the design. Check any change against all of them at once.
 
 - Next.js 15 (App Router) + React 19 + TypeScript strict. No CSS framework —
   one hand-written `globals.css`.
+- Auth.js v5 (`next-auth@beta`) with the Microsoft Entra ID provider, JWT
+  sessions, no database.
 - `output: "standalone"` — deploy by copying `.next/standalone`, `.next/static`
   and `public/` to the server and running `node server.js`.
 - Only runtime dependency beyond React/Next is `xlsx`, loaded on demand for the
@@ -39,11 +41,14 @@ The constraints are the design. Check any change against all of them at once.
 - `src/lib/types.ts` — row shapes. Deliberately outside `bc/`: a client
   component importing a type from a `server-only` module would drag the server
   code into the browser bundle.
-- `src/lib/board.ts`, `work-center.ts`, `schedule.ts`, `format.ts` — pure
-  derivations, no BC access.
+- `src/lib/board.ts`, `work-center.ts`, `schedule.ts`, `floor.ts`, `format.ts` —
+  pure derivations, no BC access.
 - `src/components/` — client components. `data-table.tsx` is the shared sortable
-  and filterable table with Excel export.
+  and filterable table with Excel export; pass it `expand` and every row opens a
+  detail panel underneath.
 - `src/app/api/*` — the same data as JSON, for Excel and Power BI.
+- `src/auth.ts` + `src/middleware.ts` — who may look at the board. Entirely
+  separate from how the app reads BC; see the note at the top of `auth.ts`.
 
 ## BC specifics
 
@@ -60,9 +65,43 @@ Three published web services, all on the **Production** environment:
   away with it because AL resolves `SourceTable` by name.
 - `Status` option: 0 Simulated, 1 Planned, 2 Firm Planned, 3 Released,
   4 Finished. Released is what the shop floor works to.
+
+### What is in scope (`src/lib/scope.ts`)
+
+Two rules decide which rows exist at all. They are applied in the **data layer**,
+so the tables, the schedule and the JSON feeds cannot disagree.
+
+- **Orders: `Location Code = PRODUCTION` only.** The other location, TRADE, is
+  bought-in and labelling work — real orders, but not this board, and they
+  outnumber production roughly fifteen to one.
+- **Components: manually flushed only** (`Flushing Method = Manual`, option 0).
+  Forward and backward flushed lines are consumed by BC automatically, so nobody
+  works from them. In the current data this removes about 46% of component lines.
+
+Both rules accept the option index or the caption, and an unreadable flushing
+method is treated as Manual — hiding a line because we could not parse it would
+remove real work from the board.
 - **Work centre comes from the routing line, not the order.** Table 5405 has no
   work centre. `PRINTING` is excluded from the derived value — it runs on nearly
   every order, so including it would collapse the schedule into one column.
+- **The whole board runs on planned dates, not due dates.** A production board
+  answers "what runs when"; the due date answers "what is owed when". On all 982
+  open orders the due date is simply the planned end plus a day (962 of them
+  exactly one day, the rest carried over a weekend), so judging lateness on it
+  would call a late order on time for a day.
+  - The schedule groups on the routing line's `Starting Date`; the card shows
+    the planned end, flagged red once it has passed.
+  - The Production orders table leads with **Planned start** and **Planned end**
+    and sorts on planned start. "Behind plan" means past the planned end and not
+    finished. The due date is still a column, well to the right — it is a real
+    commitment, it just does not drive anything.
+  - The component "Due Date" (5407) is not a promise either: on every row checked
+    it is exactly the parent order's planned start, so the column is labelled
+    **Needed**.
+- **`NETVAPS Earliest Start Date` and `NETVAPS EMAD` are empty** on all 980
+  routing lines sampled — same trap as `Finished Quantity`. The VAPS output that
+  *is* populated: `Starting Date`, `Ending Date`, and `NETVAPS Scheduled`
+  (true on 752 of 980).
 - OData renames fields when a page is published: `"Sales Order No."` arrives as
   `Sales_Order_No`. The mappers try several spellings rather than hard-coding
   one and rendering a column of blanks.
@@ -71,6 +110,18 @@ Three published web services, all on the **Production** environment:
   from `status`, never from this field.
 - `NETVAPS Scheduled` exists on both 5405 and 5409. VAPS is the scheduling
   add-on.
+- **Floor status comes from the button presses, not a field.** BC has no "is
+  this running" flag. Table 50403 (`Prod_Order_Data_Entry_Excel`) logs every
+  press — Start, Pause, Restart, Complete, QA Book — and the order's state is
+  the LAST one, ties broken on entry number. `Complete` is a booking, not the
+  end of the order, so it still reads as Running. The rules are in
+  `src/lib/floor.ts` and match the shop floor's own picking control board on
+  979 of 982 orders; the three that differ have a blank timestamp in that
+  board's export.
+- **`Line Leader` (the operator's name) is deliberately absent from the
+  snapshot.** The mapper reads it and the board shows it, so it appears as soon
+  as the app reads BC live; the snapshot is a file that leaves the server, and
+  employee names do not belong in it.
 
 ## Conventions
 
@@ -83,13 +134,14 @@ Three published web services, all on the **Production** environment:
 
 ## Known gaps (deliberate, not oversights)
 
-- **No authentication.** Network reachability is not access control. The
-  intended next step is Entra sign-in (Auth.js Microsoft Entra provider) — free,
-  no Azure subscription needed, just an app registration.
+- **No roles.** Sign-in is in place (Auth.js + Entra, tenant-restricted), but
+  everyone who can sign in sees the same board. Add a `signIn` callback in
+  `src/auth.ts` if that ever stops being true.
 - Needs one Entra app registration with admin consent and a BC permission set
-  before it can read live data. See `BC-SETUP.md`.
-- No test suite yet. The pure modules (`board`, `work-center`, `schedule`) are
-  the ones worth covering first.
+  before it can read live data (`BC-SETUP.md`), plus a second, separate
+  registration for sign-in (`AUTH-SETUP.md`).
+- Tests cover the pure modules only (`npm test`). Nothing exercises the BC
+  mappers, because that needs live credentials.
 - Errors go to the console only; no logging destination decided.
 
 ## Commands
@@ -99,4 +151,5 @@ npm install
 npm run dev      # http://localhost:3000
 npm run build    # produces .next/standalone
 npm start
+npm test         # pure logic, no BC access needed
 ```

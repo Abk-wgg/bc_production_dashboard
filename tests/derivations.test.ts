@@ -12,10 +12,47 @@ import assert from "node:assert/strict";
 
 import { buildWorkCenterMap, categorise, orderHasCategory, withWorkCenters } from "../src/lib/work-center.ts";
 import { groupByDay, toWorkCenterColumns, NO_DATE } from "../src/lib/schedule.ts";
-import { isOutstanding, isOverdue, isDueSoon, summarise } from "../src/lib/board.ts";
+import {
+  isOutstanding,
+  isBehindPlan,
+  isLateToStart,
+  isStartingSoon,
+  daysBehindPlan,
+  summarise,
+} from "../src/lib/board.ts";
+import {
+  buildFloorMap,
+  countFloorStates,
+  floorStatusOf,
+  isOnTheLine,
+} from "../src/lib/floor.ts";
 import { toStatus, statusName, RELEASED, FINISHED } from "../src/lib/status.ts";
 import { formatDate, formatLineNo } from "../src/lib/format.ts";
-import type { ProductionOrder, ProdOrderRoutingLine } from "../src/lib/types.ts";
+import { safeCallbackUrl } from "../src/lib/safe-redirect.ts";
+import {
+  isBoardLocation,
+  isManuallyFlushed,
+  toFlushingMethod,
+  MANUAL,
+} from "../src/lib/scope.ts";
+import {
+  buildProgressMap,
+  buildStockMap,
+  buildIncomingMap,
+  completionOf,
+  shortagesFor,
+  pickStateFor,
+  countPickStates,
+  buildPickStateMap,
+} from "../src/lib/chain.ts";
+import type {
+  ProductionOrder,
+  ProdOrderRoutingLine,
+  OutputEvent,
+  StockLot,
+  PurchaseLine,
+  ProdOrderComponent,
+} from "../src/lib/types.ts";
 
 function order(overrides: Partial<ProductionOrder> = {}): ProductionOrder {
   return {
@@ -36,6 +73,9 @@ function order(overrides: Partial<ProductionOrder> = {}): ProductionOrder {
     salesOrderNo: "OLCSO-77",
     scheduled: true,
     completelyPicked: false,
+    flavour: "",
+    strength: "",
+    cartoned: "",
     ...overrides,
   };
 }
@@ -105,21 +145,52 @@ test("PROD* is production, anything else is trade", () => {
   assert.equal(orderHasCategory("TRADE1", "production"), false);
 });
 
-test("days sort ascending with undated orders last", () => {
+test("days sort ascending with unscheduled orders last", () => {
   const days = groupByDay(
     withWorkCenters(
+      [order({ no: "A" }), order({ no: "B" }), order({ no: "C" })],
       [
-        order({ no: "B", dueDate: "2026-09-11" }),
-        order({ no: "C", dueDate: null }),
-        order({ no: "A", dueDate: "2026-09-10" }),
+        line({ prodOrderNo: "B", startingDate: "2026-09-11" }),
+        line({ prodOrderNo: "A", startingDate: "2026-09-10" }),
+        // C has no routing line, so nothing schedules it.
       ],
-      [],
     ),
   );
   assert.deepEqual(
     days.map((d) => d.key),
     ["2026-09-10", "2026-09-11", NO_DATE],
   );
+});
+
+test("the schedule day is the routing start date, not the due date", () => {
+  // The distinction the whole page turns on: this order is owed in October but
+  // runs in September, and it belongs on the September day.
+  const [row] = withWorkCenters(
+    [order({ no: "A", dueDate: "2026-10-30" })],
+    [line({ prodOrderNo: "A", startingDate: "2026-09-14" })],
+  );
+  assert.equal(row.scheduledStart, "2026-09-14");
+  assert.equal(groupByDay([row])[0].key, "2026-09-14");
+});
+
+test("an order takes the earliest start across its operations", () => {
+  const [row] = withWorkCenters(
+    [order({ no: "A" })],
+    [
+      line({ prodOrderNo: "A", no: "PROD2", operationNo: "20", startingDate: "2026-09-16" }),
+      line({ prodOrderNo: "A", no: "PROD1", operationNo: "10", startingDate: "2026-09-14" }),
+    ],
+  );
+  assert.equal(row.scheduledStart, "2026-09-14");
+});
+
+test("PRINTING does not schedule an order any more than it locates it", () => {
+  const [row] = withWorkCenters(
+    [order({ no: "A" })],
+    [line({ prodOrderNo: "A", no: "PRINTING", workCenterNo: "PRINTING", startingDate: "2026-09-14" })],
+  );
+  assert.equal(row.workCenter, "");
+  assert.equal(row.scheduledStart, null);
 });
 
 test("columns order production first, then trade, then unassigned", () => {
@@ -164,35 +235,62 @@ test("outstanding is driven by status, never by finishedQuantity", () => {
   assert.equal(isOutstanding(order({ status: RELEASED, finishedQuantity: 0 })), true);
 });
 
-test("overdue needs an outstanding order with a due date in the past", () => {
+test("behind plan reads the planned end date, never the due date", () => {
   const asOf = "2026-09-10";
-  assert.equal(isOverdue(order({ dueDate: "2026-09-09" }), asOf), true);
-  assert.equal(isOverdue(order({ dueDate: "2026-09-10" }), asOf), false);
-  assert.equal(isOverdue(order({ dueDate: null }), asOf), false);
-  assert.equal(isOverdue(order({ dueDate: "2026-09-09", status: FINISHED }), asOf), false);
+  // The due date is a day later than the planned end on nearly every order in
+  // this tenant, so judging on it would call a late order on time for a day.
+  assert.equal(isBehindPlan(order({ endingDate: "2026-09-09", dueDate: "2026-09-30" }), asOf), true);
+  assert.equal(isBehindPlan(order({ endingDate: "2026-09-10" }), asOf), false);
+  assert.equal(isBehindPlan(order({ endingDate: null, dueDate: "2026-01-01" }), asOf), false);
+  assert.equal(
+    isBehindPlan(order({ endingDate: "2026-09-09", status: FINISHED }), asOf),
+    false,
+  );
 });
 
-test("due soon spans today to seven days out inclusive", () => {
+test("late to start reads the planned start", () => {
   const asOf = "2026-09-10";
-  assert.equal(isDueSoon(order({ dueDate: "2026-09-10" }), asOf), true);
-  assert.equal(isDueSoon(order({ dueDate: "2026-09-17" }), asOf), true);
-  assert.equal(isDueSoon(order({ dueDate: "2026-09-18" }), asOf), false);
+  assert.equal(isLateToStart(order({ startingDate: "2026-09-09" }), asOf), true);
+  assert.equal(isLateToStart(order({ startingDate: "2026-09-10" }), asOf), false);
+  assert.equal(isLateToStart(order({ startingDate: null }), asOf), false);
+});
+
+test("starting soon spans today to seven days out inclusive", () => {
+  const asOf = "2026-09-10";
+  assert.equal(isStartingSoon(order({ startingDate: "2026-09-10" }), asOf), true);
+  assert.equal(isStartingSoon(order({ startingDate: "2026-09-17" }), asOf), true);
+  assert.equal(isStartingSoon(order({ startingDate: "2026-09-18" }), asOf), false);
+  // Yesterday is late, not soon - it belongs in the other count.
+  assert.equal(isStartingSoon(order({ startingDate: "2026-09-09" }), asOf), false);
+});
+
+test("days behind plan never goes negative", () => {
+  assert.equal(daysBehindPlan(order({ endingDate: "2026-09-07" }), "2026-09-10"), 3);
+  assert.equal(daysBehindPlan(order({ endingDate: "2026-09-20" }), "2026-09-10"), 0);
+  assert.equal(daysBehindPlan(order({ endingDate: null }), "2026-09-10"), 0);
 });
 
 test("summary counts outstanding work, not every row", () => {
   const summary = summarise(
     [
-      order({ no: "A", dueDate: "2026-09-09", quantity: 100 }),
+      order({ no: "A", startingDate: "2026-09-06", endingDate: "2026-09-09", quantity: 100 }),
       order({ no: "B", status: FINISHED, quantity: 999 }),
-      order({ no: "C", dueDate: "2026-09-12", quantity: 50, scheduled: false }),
+      order({
+        no: "C",
+        startingDate: "2026-09-12",
+        endingDate: "2026-09-13",
+        quantity: 50,
+        scheduled: false,
+      }),
     ],
     "2026-09-10",
   );
   assert.equal(summary.total, 3);
   assert.equal(summary.outstanding, 2);
-  assert.equal(summary.overdue, 1);
-  assert.equal(summary.dueSoon, 1);
+  assert.equal(summary.behindPlan, 1);
+  assert.equal(summary.startingSoon, 1);
   assert.equal(summary.unscheduled, 1);
+  assert.equal(summary.unplanned, 0);
   assert.equal(summary.outstandingUnits, 150);
 });
 
@@ -215,4 +313,331 @@ test("BC line numbers display as human line numbers", () => {
   assert.equal(formatLineNo(10000), "1");
   assert.equal(formatLineNo(30000), "3");
   assert.equal(formatLineNo(0), "");
+});
+
+test("sign-in only ever returns to a path on this site", () => {
+  assert.equal(safeCallbackUrl("/schedule"), "/schedule");
+  assert.equal(safeCallbackUrl("/components?order=OLCRELPROD100"), "/components?order=OLCRELPROD100");
+  assert.equal(safeCallbackUrl(undefined), "/");
+  assert.equal(safeCallbackUrl(""), "/");
+  // Absolute and protocol-relative URLs are the phishing shapes.
+  assert.equal(safeCallbackUrl("https://evil.example.com"), "/");
+  assert.equal(safeCallbackUrl("//evil.example.com"), "/");
+  // String.raw so the backslash is unmistakably a backslash - written as a
+  // plain literal, "\e" is not a valid escape and collapses to "e", which
+  // makes the test silently assert something else.
+  assert.equal(safeCallbackUrl(String.raw`/\evil.example.com`), "/");
+});
+
+test("the board is only the PRODUCTION location", () => {
+  assert.equal(isBoardLocation("PRODUCTION"), true);
+  assert.equal(isBoardLocation("production"), true);
+  assert.equal(isBoardLocation(" PRODUCTION "), true);
+  // TRADE is the one that has to be excluded - it outnumbers production
+  // roughly fifteen to one, so letting it through swamps the board.
+  assert.equal(isBoardLocation("TRADE"), false);
+  assert.equal(isBoardLocation(""), false);
+});
+
+test("flushing method accepts the option index or its caption", () => {
+  assert.equal(toFlushingMethod(0), MANUAL);
+  assert.equal(toFlushingMethod("0"), MANUAL);
+  assert.equal(toFlushingMethod("Manual"), MANUAL);
+  assert.equal(toFlushingMethod(2), 2);
+  assert.equal(toFlushingMethod("Backward"), 2);
+  assert.equal(toFlushingMethod("Pick + Forward"), 3);
+  // Unreadable values are treated as Manual: dropping a component line because
+  // we could not parse its flushing method would hide real work.
+  assert.equal(toFlushingMethod("something new"), MANUAL);
+  assert.equal(toFlushingMethod(undefined), MANUAL);
+});
+
+test("only manually flushed components are shown", () => {
+  assert.equal(isManuallyFlushed(MANUAL), true);
+  // Forward and backward flushed lines are consumed by BC on their own, so
+  // nobody works from them.
+  assert.equal(isManuallyFlushed(1), false);
+  assert.equal(isManuallyFlushed(2), false);
+  assert.equal(isManuallyFlushed(3), false);
+});
+
+
+// --- the chain --------------------------------------------------------------
+
+function event(overrides: Partial<OutputEvent> = {}): OutputEvent {
+  return {
+    entryNo: 1,
+    prodOrderNo: "A",
+    sourceNo: "ITEM-1",
+    buttonEvent: "Complete",
+    eventType: "Output",
+    at: "2026-08-03T06:06:14Z",
+    lineLeader: "",
+    qtyOutput: 0,
+    qtyScrapped: 0,
+    booked: true,
+    lotNo: "",
+    ...overrides,
+  };
+}
+
+function lot(overrides: Partial<StockLot> = {}): StockLot {
+  return {
+    itemNo: "ITEM-1",
+    variantCode: "",
+    lotNo: "L1",
+    description: "",
+    itemCategoryCode: "",
+    locationCode: "PRODUCTION",
+    binCode: "",
+    quantity: 100,
+    availableQuantity: 100,
+    unitOfMeasureCode: "KG",
+    available: true,
+    expiryDate: null,
+    productionDate: null,
+    lotStatus: "RELEASED",
+    ...overrides,
+  };
+}
+
+function poLine(overrides: Partial<PurchaseLine> = {}): PurchaseLine {
+  return {
+    documentNo: "PO-1",
+    lineNo: 10000,
+    vendorNo: "V1",
+    itemNo: "ITEM-1",
+    description: "",
+    locationCode: "PRODUCTION",
+    quantity: 100,
+    outstandingQuantity: 100,
+    quantityReceived: 0,
+    expectedReceiptDate: "2026-09-20",
+    promisedReceiptDate: null,
+    orderDate: null,
+    unitOfMeasureCode: "KG",
+    completelyReceived: false,
+    ...overrides,
+  };
+}
+
+function component(overrides: Partial<ProdOrderComponent> = {}): ProdOrderComponent {
+  return {
+    prodOrderNo: "A",
+    prodOrderLineNo: 10000,
+    lineNo: 10000,
+    status: RELEASED,
+    itemNo: "ITEM-1",
+    description: "Bottle",
+    unitOfMeasureCode: "EA",
+    quantityPer: 1,
+    quantity: 100,
+    remainingQuantity: 100,
+    expectedQuantity: 100,
+    locationCode: "PRODUCTION",
+    binCode: "",
+    variantCode: "",
+    dueDate: null,
+    flushingMethod: MANUAL,
+    qtyPicked: 0,
+    completelyPicked: false,
+    emad: null,
+    ...overrides,
+  };
+}
+
+test("output is summed net of reversals, never absolute", () => {
+  // A correction posts a matching negative row. Taking absolutes here would
+  // report 1806 made when the true figure is nil.
+  const progress = buildProgressMap([
+    event({ qtyOutput: 903 }),
+    event({ qtyOutput: -903 }),
+  ]);
+  assert.equal(progress.get("A")?.made, 0);
+});
+
+test("scrap comes from Scrap events only, not Consumption rows", () => {
+  const progress = buildProgressMap([
+    event({ eventType: "Output", qtyOutput: 1000 }),
+    event({ eventType: "Scrap", qtyScrapped: 12 }),
+    // Consumption rows carry a scrap quantity too - counting it would double up.
+    event({ eventType: "Consumption", qtyScrapped: 5 }),
+  ]);
+  assert.equal(progress.get("A")?.made, 1000);
+  assert.equal(progress.get("A")?.scrapped, 12);
+});
+
+test("Start and Pause presses book no quantity", () => {
+  const progress = buildProgressMap([
+    event({ buttonEvent: "Start", eventType: "" }),
+    event({ buttonEvent: "Pause", eventType: "" }),
+  ]);
+  assert.equal(progress.get("A"), undefined);
+});
+
+test("progress is capped at 100% for display but overproduction is kept", () => {
+  assert.equal(completionOf(50, 100), 0.5);
+  assert.equal(completionOf(150, 100), 1);
+  assert.equal(completionOf(10, 0), 0);
+});
+
+test("stock sums lots and keeps the earliest expiry", () => {
+  const stock = buildStockMap([
+    lot({ lotNo: "L1", availableQuantity: 20, expiryDate: "2028-07-29" }),
+    lot({ lotNo: "L2", availableQuantity: 5, expiryDate: "2028-07-07" }),
+  ]);
+  assert.equal(stock.get("ITEM-1")?.available, 25);
+  assert.equal(stock.get("ITEM-1")?.lots, 2);
+  assert.equal(stock.get("ITEM-1")?.earliestExpiry, "2028-07-07");
+});
+
+test("incoming supply prefers the promised date over the expected one", () => {
+  const incoming = buildIncomingMap([
+    poLine({ expectedReceiptDate: "2026-09-20", promisedReceiptDate: "2026-09-25" }),
+  ]);
+  // Promised is what the vendor committed to; expected is what we assumed.
+  assert.equal(incoming.get("ITEM-1")?.nextReceipt, "2026-09-25");
+});
+
+test("a fully received line is not incoming", () => {
+  const incoming = buildIncomingMap([poLine({ outstandingQuantity: 0 })]);
+  assert.equal(incoming.get("ITEM-1"), undefined);
+});
+
+test("a shortage is remaining demand the free stock cannot cover", () => {
+  const stock = buildStockMap([lot({ availableQuantity: 30 })]);
+  const incoming = buildIncomingMap([poLine({ promisedReceiptDate: "2026-09-25" })]);
+  const [short] = shortagesFor([component({ remainingQuantity: 100 })], stock, incoming);
+  assert.equal(short.short, 70);
+  assert.equal(short.nextReceipt, "2026-09-25");
+});
+
+test("an item with no stock row at all is short, not skipped", () => {
+  // Absence of a stock row is absence of stock - treating it as unknown would
+  // quietly drop the very lines most worth seeing.
+  const [short] = shortagesFor([component({ itemNo: "NOT-STOCKED" })], new Map(), new Map());
+  assert.equal(short.itemNo, "NOT-STOCKED");
+  assert.equal(short.available, 0);
+  assert.equal(short.short, 100);
+});
+
+test("a line with nothing left to consume cannot be short", () => {
+  assert.deepEqual(shortagesFor([component({ remainingQuantity: 0 })], new Map(), new Map()), []);
+});
+
+
+test("an order whose every line is covered can be picked complete", () => {
+  const stock = buildStockMap([lot({ availableQuantity: 200 })]);
+  assert.equal(pickStateFor([component({ remainingQuantity: 100 })], stock), "can-pick");
+});
+
+test("partly covered is 'some missing', not 'none available'", () => {
+  const stock = buildStockMap([lot({ itemNo: "A", availableQuantity: 200 })]);
+  const state = pickStateFor(
+    [
+      component({ itemNo: "A", remainingQuantity: 100 }),
+      component({ itemNo: "B", remainingQuantity: 100 }),
+    ],
+    stock,
+  );
+  assert.equal(state, "some-missing");
+});
+
+test("nothing coverable is its own state - the order cannot start at all", () => {
+  const state = pickStateFor([component({ remainingQuantity: 100 })], new Map());
+  assert.equal(state, "none-available");
+});
+
+test("an order with nothing left to consume is 'nothing to pick', not 'can pick'", () => {
+  // Calling a finished-picking order ready would put it in front of someone
+  // for no reason.
+  const stock = buildStockMap([lot({ availableQuantity: 999 })]);
+  assert.equal(pickStateFor([component({ remainingQuantity: 0 })], stock), "nothing-to-pick");
+  assert.equal(pickStateFor([], stock), "nothing-to-pick");
+});
+
+test("exact cover counts as covered, not short", () => {
+  const stock = buildStockMap([lot({ availableQuantity: 100 })]);
+  assert.equal(pickStateFor([component({ remainingQuantity: 100 })], stock), "can-pick");
+});
+
+test("pick states are counted across every order", () => {
+  const stock = buildStockMap([lot({ itemNo: "A", availableQuantity: 500 })]);
+  const states = buildPickStateMap(
+    {
+      ok: [component({ itemNo: "A", remainingQuantity: 100 })],
+      bad: [component({ itemNo: "Z", remainingQuantity: 100 })],
+      done: [component({ remainingQuantity: 0 })],
+    },
+    stock,
+  );
+  const counts = countPickStates(states);
+  assert.equal(counts["can-pick"], 1);
+  assert.equal(counts["none-available"], 1);
+  assert.equal(counts["nothing-to-pick"], 1);
+  assert.equal(counts["some-missing"], 0);
+});
+
+
+// --- floor status -----------------------------------------------------------
+
+test("a button press maps to what the line is doing", () => {
+  assert.equal(floorStatusOf("Start"), "running");
+  assert.equal(floorStatusOf("Restart"), "running");
+  // A Complete is a booking - output, consumption or scrap - not the end of the
+  // order. BC's Finished status answers that, and it is a different question.
+  assert.equal(floorStatusOf("Complete"), "running");
+  assert.equal(floorStatusOf("Pause"), "paused");
+  assert.equal(floorStatusOf("QA Book"), "qa-booked");
+  // Something happened, so it cannot be "not started".
+  assert.equal(floorStatusOf("Some New Button"), "running");
+});
+
+test("floor status is the last press, not the first", () => {
+  const floor = buildFloorMap([
+    event({ prodOrderNo: "A", entryNo: 1, buttonEvent: "Start", at: "2026-08-28T06:00:00Z" }),
+    event({
+      prodOrderNo: "A",
+      entryNo: 2,
+      buttonEvent: "Pause",
+      at: "2026-08-28T09:30:00Z",
+      lineLeader: "Esther Cheng",
+    }),
+  ]);
+
+  assert.equal(floor.get("A")?.status, "paused");
+  assert.equal(floor.get("A")?.operator, "Esther Cheng");
+  assert.equal(floor.get("A")?.at, "2026-08-28T09:30:00Z");
+});
+
+test("presses sharing a timestamp are ordered by entry number", () => {
+  // These land milliseconds apart and BC can return them either way round. A
+  // Complete and the QA Book after it say opposite things about the line, so
+  // the tie-break is what stops the column flickering between the two.
+  const floor = buildFloorMap([
+    event({ prodOrderNo: "A", entryNo: 9, buttonEvent: "QA Book", at: "2026-08-28T11:47:27Z" }),
+    event({ prodOrderNo: "A", entryNo: 8, buttonEvent: "Complete", at: "2026-08-28T11:47:27Z" }),
+  ]);
+
+  assert.equal(floor.get("A")?.status, "qa-booked");
+});
+
+test("an order with no events is not on the line", () => {
+  const floor = buildFloorMap([event({ prodOrderNo: "A" })]);
+  assert.equal(floor.has("B"), false);
+  assert.equal(isOnTheLine("not-started"), false);
+  assert.equal(isOnTheLine("qa-booked"), true);
+});
+
+test("floor counts are taken over the orders on the board", () => {
+  const floor = buildFloorMap([
+    event({ prodOrderNo: "A", buttonEvent: "Start" }),
+    event({ prodOrderNo: "B", buttonEvent: "Pause" }),
+    // Belongs to an order this board does not show - TRADE, say. It must not
+    // reach the totals, or the tiles count work that is not on the screen.
+    event({ prodOrderNo: "Z", buttonEvent: "Start" }),
+  ]);
+
+  const counts = countFloorStates(["A", "B", "C"], floor);
+  assert.deepEqual(counts, { running: 1, paused: 1, "qa-booked": 0, "not-started": 1 });
 });
