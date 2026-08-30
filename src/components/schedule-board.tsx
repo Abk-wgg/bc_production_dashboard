@@ -4,11 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { BoardOrder, ComponentLine } from "@/lib/types";
 import { completionOf, pickStateLabel, type PickState } from "@/lib/chain";
-import {
-  DATE_FILTER_HELP,
-  DATE_FILTER_PLACEHOLDER,
-  parseDateFilter,
-} from "@/lib/date-filter";
+import DateFilterBox from "@/components/date-filter-box";
+import { parseDateFilter } from "@/lib/date-filter";
 import { floorLabel, floorTone } from "@/lib/floor";
 import { formatDate, formatDayHeading, formatNumber } from "@/lib/format";
 import {
@@ -254,18 +251,15 @@ export default function ScheduleBoard({
 
         <label style={{ fontSize: 13.5, color: "var(--muted)" }}>
           Dates{" "}
-          <input
-            type="text"
-            className={dateState}
-            style={{ width: 160 }}
+          <DateFilterBox
             value={dateExpr}
-            placeholder={DATE_FILTER_PLACEHOLDER}
-            title={DATE_FILTER_HELP}
-            aria-label="Filter days"
-            onChange={(e) => {
-              setDateExpr(e.target.value);
+            onChange={(next) => {
+              setDateExpr(next);
               setDayIndex(0);
             }}
+            state={dateState}
+            ariaLabel="Filter days"
+            style={{ width: 176 }}
           />
         </label>
         <button

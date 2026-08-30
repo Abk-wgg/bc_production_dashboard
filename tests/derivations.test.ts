@@ -44,7 +44,7 @@ import { formatDate, formatLineNo } from "../src/lib/format.ts";
 import { safeCallbackUrl } from "../src/lib/safe-redirect.ts";
 import { groupByOrder, isShort, shortfallOf } from "../src/lib/component-groups.ts";
 import { pageWindow, GAP } from "../src/lib/paging.ts";
-import { parseDateFilter } from "../src/lib/date-filter.ts";
+import { DATE_PRESETS, parseDateFilter } from "../src/lib/date-filter.ts";
 import {
   isBoardLocation,
   isBoardStatus,
@@ -1134,6 +1134,36 @@ test("a step with nothing to step does not parse", () => {
   assert.equal(parseDateFilter("cd+", ASOF), null);
   assert.equal(parseDateFilter("zz+2", ASOF), null);
   assert.equal(parseDateFilter("310226+1", ASOF), null);
+});
+
+test("every preset in the menu is something the language can read", () => {
+  // The menu writes its expression into the box, so a preset that does not
+  // parse would put the box straight into its red state - the one case where
+  // red would be the app's fault rather than the typist's.
+  for (const preset of DATE_PRESETS) {
+    assert.ok(
+      parseDateFilter(preset.expr, ASOF),
+      `preset "${preset.label}" does not parse: ${preset.expr}`,
+    );
+  }
+});
+
+test("the presets mean what their labels say", () => {
+  const expr = (label: string) => DATE_PRESETS.find((p) => p.label === label)!.expr;
+
+  // ASOF is Sunday 30 August 2026, which makes the week boundary worth
+  // pinning: its Monday is the 24th and next week starts on the 31st.
+  assert.equal(hits(expr("Today"), ASOF), true);
+  assert.equal(hits(expr("Tomorrow"), "2026-08-31"), true);
+  assert.equal(hits(expr("Next 7 days"), "2026-09-06"), true);
+  assert.equal(hits(expr("Next 7 days"), "2026-09-07"), false);
+  assert.equal(hits(expr("This week"), "2026-08-24"), true);
+  assert.equal(hits(expr("Next week"), "2026-08-31"), true);
+  assert.equal(hits(expr("This month"), "2026-08-01"), true);
+  assert.equal(hits(expr("From today"), ASOF), true);
+  assert.equal(hits(expr("From today"), "2026-08-29"), false);
+  assert.equal(hits(expr("Before today"), "2026-08-29"), true);
+  assert.equal(hits(expr("Before today"), ASOF), false);
 });
 
 test("a row with no date never matches", () => {

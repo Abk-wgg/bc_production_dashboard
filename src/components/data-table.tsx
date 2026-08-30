@@ -2,11 +2,8 @@
 
 import { memo, useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { pageWindow } from "@/lib/paging";
-import {
-  DATE_FILTER_HELP,
-  DATE_FILTER_PLACEHOLDER,
-  parseDateFilter,
-} from "@/lib/date-filter";
+import DateFilterBox from "@/components/date-filter-box";
+import { parseDateFilter } from "@/lib/date-filter";
 
 export type Column<T> = {
   key: string;
@@ -385,18 +382,18 @@ export default function DataTable<T>({
                             </option>
                           ))}
                         </select>
+                      ) : column.filter === "date" ? (
+                        <DateFilterBox
+                          value={columnFilters[column.key] ?? ""}
+                          onChange={onPick}
+                          state={state}
+                          ariaLabel={`Filter ${column.label}`}
+                        />
                       ) : (
                         <input
                           type="text"
-                          className={state}
-                          placeholder={
-                            column.filter === "date" ? DATE_FILTER_PLACEHOLDER : "Filter…"
-                          }
-                          title={
-                            column.filter === "date"
-                              ? DATE_FILTER_HELP
-                              : `Filter ${column.label}`
-                          }
+                          placeholder="Filter…"
+                          title={`Filter ${column.label}`}
                           value={columnFilters[column.key] ?? ""}
                           onChange={(e) => onPick(e.target.value)}
                           aria-label={`Filter ${column.label}`}

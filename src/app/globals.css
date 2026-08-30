@@ -408,6 +408,56 @@ input.unparsed {
 input.parsed:focus-visible { outline-color: var(--good); }
 input.unparsed:focus-visible { outline-color: var(--crit); }
 
+/* The date box: the expression, and a caret offering the common ones.
+
+   The caret sits inside the input rather than beside it because in a table
+   filter row there is no beside - the columns are 105px and every pixel spent
+   on a control is one the value cannot use. */
+.dfbox { position: relative; display: inline-flex; align-items: center; width: 100%; }
+
+/* Two classes, so this beats `thead tr:nth-child(2) th input` on specificity
+   without an !important. Class count is compared before element count. */
+.dfbox .dfin { width: 100%; padding-right: 27px; }
+
+.dfbox .dfcaret {
+  position: absolute;
+  right: 1px;
+  top: 1px;
+  bottom: 1px;
+  width: 25px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  /* Not --muted, which is what the sort arrows use. Those are a state
+     readout; this is a control, and it has to look worth clicking. */
+  color: var(--ink-2);
+  font-size: 22px;
+  line-height: 1;
+  border-radius: 0 5px 5px 0;
+}
+
+.dfbox .dfcaret:hover { color: var(--ink); background: var(--rule); }
+.dfbox .dfcaret:focus-visible { outline-offset: -1px; }
+
+/* Pinned to the viewport, not to the box - see date-filter-box.tsx. The top
+   and left come from a measurement, so they are set inline. */
+.dfmenu { position: fixed; min-width: 218px; }
+.dfmenu .dropdown-item { width: 100%; border: 0; background: none; text-align: left; }
+
+/* The expression the row will write. Monospace, and to the right, so the menu
+   reads as label-then-what-it-types rather than as two columns of words. */
+.dfexpr {
+  margin-left: auto;
+  padding-left: 12px;
+  font-family: var(--font-mono), "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* Same specificity as the reset above it, so source order decides - which is
+   why this sits after it rather than relying on !important. */
+.dfmenu .dfclear { margin-top: 4px; border-top: 1px solid var(--rule); border-radius: 0; }
+
 th button.sort {
   width: 100%;
   border: 0;

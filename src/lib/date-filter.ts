@@ -266,3 +266,22 @@ export const DATE_FILTER_HELP = [
 
 /** What an empty date box suggests. */
 export const DATE_FILTER_PLACEHOLDER = "300826, cw, cd+2\u2026";
+
+/**
+ * The common questions, as expressions.
+ *
+ * Every one is something you could have typed, which is deliberate: the menu
+ * fills the box rather than filtering behind it, so choosing one shows you
+ * what to type next time. A tooltip is hover-only and nobody hovers a filter
+ * box to find out whether it has a language.
+ */
+export const DATE_PRESETS: readonly { label: string; expr: string }[] = [
+  { label: "Today", expr: "cd" },
+  { label: "Tomorrow", expr: "cd+1" },
+  { label: "Next 7 days", expr: "cd..cd+7" },
+  { label: "This week", expr: "cw" },
+  { label: "Next week", expr: "cw+1" },
+  { label: "This month", expr: "cm" },
+  { label: "From today", expr: ">=cd" },
+  { label: "Before today", expr: "<cd" },
+];
